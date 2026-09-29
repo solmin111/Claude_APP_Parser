@@ -166,7 +166,7 @@ def _drop_undefined(records):
     """팀 공통 정의에 없는 관찰을 결과에서 뺀다. -> 뺀 건수
 
     서비스마다 제각각 만들어 낸 관찰은 파서끼리 결과를 합칠 때 비교가 되지
-    않는다. 7회차 회의에서 공통 카탈로그에 있는 것만 내기로 정했다.
+    않는다. 그래서 공통 행위 분류표에 있는 것만 낸다.
     어떤 종류를 왜 빼는지는 events.DROPPED_OBSERVATIONS 에 적어 두었다.
     """
     keep, n = [], 0
@@ -187,10 +187,10 @@ def _collapse_drafts(records):
     가장 완성된 문장만 보고서에 싣고, 접힌 개수는 근거에 적는다.
 
     한글은 글자 단위로 자라지 않는다. 마지막 글자가 조합 중이라 'ㅋ+ㅡ'가 '크'로
-    보이다가 'ㄹ'이 붙으면 '클'로 바뀐다. 그래서 앞부분만 비교하면 접히지 않는다
-    (실측: 크 -> 클로드와 과 -> 문ㅅ -> 문서 부 가 5줄로 남았다). 마지막 글자를
-    떼고 비교해 조합 중인 한 글자를 무시한다. 그러면 같은 문장의 성장 단계는
-    접히고, 지웠다가 다시 친 다른 문장은 따로 남는다.
+    보이다가 'ㄹ'이 붙으면 '클'로 바뀐다. 그래서 앞부분만 비교하면 접히지 않고
+    한 문장이 여러 줄로 남는다. 마지막 글자를 떼고 비교해 조합 중인 한 글자를
+    무시한다. 그러면 같은 문장의 성장 단계는 접히고, 지웠다가 다시 친 다른
+    문장은 따로 남는다.
     """
     drafts = [r for r in records
               if (r.get("details") or {}).get("item_type") == "draft"
@@ -397,7 +397,7 @@ def run(input_path, input_type="auto", kinds=DEFAULT_KINDS, max_excerpt=500,
 
     dropped = _drop_undefined(records)
     if dropped:
-        say("공통 정의에 없는 관찰 %d건 제외 (7회차 회의 결정)" % dropped)
+        say("공통 행위 정의에 없는 관찰 %d건 제외" % dropped)
 
     folded = _collapse_drafts(records)
     if folded:

@@ -5,7 +5,7 @@ IndexedDB 값은 V8 구조화 복제(structured clone)라서 정식 역직렬화
 파이썬 dict 로 나온다. 그러면 발화자·시각·대화 UUID 를 추측 없이 읽는다.
 
 Claude Desktop 은 claude.ai 오리진 아래 IndexedDB 를 여섯 개 쓰는데, 대화는
-두 곳에 두 가지 형태로 들어간다 (실측).
+두 곳에 두 가지 형태로 들어간다.
 
   claude-conversation-store / trees
       product='chat'    tree = {uuid, name, chat_messages:[{sender, content, …}]}

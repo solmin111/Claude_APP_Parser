@@ -2,7 +2,7 @@
 
 Chromium 은 IndexedDB 값을 V8 직렬화로 넣는데, 문자열을 내용에 따라 다르게 담는다.
 
-    ASCII 만        1바이트(Latin-1)  ->  "role" "user" "session_id" "cse_01CY…"
+    ASCII 만        1바이트(Latin-1)  ->  "role" "user" "session_id" "cse_…"
     비ASCII 포함     UTF-16LE          ->  "이 사진을 분석해 주세요 …"
 
 한 레코드 안에 두 인코딩이 나란히 있어서, 한쪽 기준으로만 읽으면 다른 쪽이
@@ -76,7 +76,7 @@ def is_human_text(s):
 
 
 # 역할 표식이 본문에서 이 거리 안에 있으면 같은 메시지 것으로 본다.
-# 실측 중앙값 517B · 최대 825B 였다. 멀리 있는 것도 버리지 않되 확신도를 낮춘다.
+# 멀리 있는 것도 버리지 않되 확신도를 낮춘다.
 NEAR_BYTES = 200
 
 

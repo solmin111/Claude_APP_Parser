@@ -13,7 +13,7 @@ from ..util import excerpt
 from .misc import _BY_MARKER, _MARKER_RE
 from .v8text import SKIP_FILES, TEXT_RUN, is_human_text, messages, views
 
-# 입력 초안 — 사용자가 친 문장. 키 바로 뒤에 값이 온다(실측 200B 안쪽).
+# 입력 초안 — 사용자가 친 문장. 키 바로 뒤에 값이 온다.
 # 뿌리 메시지의 부모 (팀 공통 양식)
 ROOT_PARENT = "00000000-0000-4000-8000-000000000000"
 
@@ -73,7 +73,7 @@ def _collapse(found):
 
 
 # 삭제된 파일의 클러스터는 다른 데이터가 덮어쓴다. 경로만 보고 내용을 읽으면
-# Windows Update 로그나 드라이버 이름이 'Claude 대화'로 실린다 — 실측으로 확인.
+# 다른 프로그램이 남긴 로그나 문자열이 'Claude 대화'로 실릴 수 있다.
 # Chromium 저장소라면 아래 중 하나는 반드시 남는다.
 LEVELDB_MAGIC = bytes.fromhex("57fb808b247547db")
 STORAGE_SIGNS = (b"claude.ai", b"_chrome", b"META:", b"VERSION", LEVELDB_MAGIC,
