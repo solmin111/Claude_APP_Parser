@@ -368,8 +368,8 @@ def run(input_path, input_type="auto", kinds=DEFAULT_KINDS, max_excerpt=500,
     for k, n in sorted(by_kind.items(), key=lambda x: -x[1]):
         say("[%s] 레코드 %d건" % (k, n))
     if superseded:
-        say("정식 파싱이 이미 복원한 저장소의 바이트 스캔 본문 %d건은 "
-            "보고서에서 내림(JSON 에는 남김)" % superseded)
+        say("이미 복원한 대화의 중복 조각 %d건 정리 "
+            "(근거는 result.json 에 보존)" % superseded)
     idb_summary["byte_scan_superseded"] = superseded
 
     # --- 3b. $UsnJrnl:$J ------------------------------------------------
@@ -395,9 +395,7 @@ def run(input_path, input_type="auto", kinds=DEFAULT_KINDS, max_excerpt=500,
     if merged:
         say("같은 공유 스냅샷 %d건을 하나로 합침" % merged)
 
-    dropped = _drop_undefined(records)
-    if dropped:
-        say("공통 행위 정의에 없는 관찰 %d건 제외" % dropped)
+    _drop_undefined(records)
 
     folded = _collapse_drafts(records)
     if folded:
