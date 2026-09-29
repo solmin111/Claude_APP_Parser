@@ -261,7 +261,7 @@ def parse_group(vfiles, image, rb, max_excerpt=500, say=None):
     if not summary["available"] or not vfiles:
         return [], summary
 
-    tmp = tempfile.mkdtemp(prefix="clparser_idb_")
+    tmp = tempfile.mkdtemp(prefix="parser_idb_")
     records = []
     try:
         dirs, written = idbtree.materialize(vfiles, tmp)

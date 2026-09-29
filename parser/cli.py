@@ -1,6 +1,6 @@
 """명령행 인터페이스.
 
-  python -m clparser --input <image.E01|image.dd|디렉터리> --out-dir <결과폴더>
+  python -m parser --input <image.E01|image.dd|디렉터리> --out-dir <결과폴더>
 """
 
 import argparse
@@ -14,7 +14,7 @@ from .errors import ClError
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="clparser",
+        prog="parser",
         description="Claude Desktop 아티팩트 파서 (E01/RAW 디스크 이미지 -> JSON/CSV)")
     p.add_argument("--input", "-i", required=True,
                    help="E01(분할 포함)/RAW .dd/.raw 이미지 또는 추출 디렉터리")
@@ -40,7 +40,7 @@ def build_parser():
     p.add_argument("--quiet", action="store_true")
     # 통합기(parsers.json)가 파서 버전을 읽어 실행 기록에 남긴다.
     p.add_argument("--version", action="version",
-                   version="clparser %s" % __version__)
+                   version="parser %s" % __version__)
     return p
 
 

@@ -412,7 +412,7 @@ def run(input_path, input_type="auto", kinds=DEFAULT_KINDS, max_excerpt=500,
         status_counts[s] = status_counts.get(s, 0) + 1
 
     result = Result({
-        "tool": {"name": "clparser", "version": __version__,
+        "tool": {"name": "parser", "version": __version__,
                  "target": "Claude Desktop (MSIX Claude_pzs8sxrjxfjjc · "
                            "%APPDATA%\\Claude · %LOCALAPPDATA%\\Claude[-Data])"},
         "input": image_desc,
