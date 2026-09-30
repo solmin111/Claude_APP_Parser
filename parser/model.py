@@ -71,7 +71,7 @@ class Record(dict):
         self["schema_version"] = SCHEMA_VERSION
         self["record_id"] = record_id
         self["event"] = {"event_id": event_id, "event_name": event_name,
-                         "catalog": "WHS4 에레렘 팀 공통 사용자 행위 분류표"}
+                         "catalog": "사용자 행위 분류표"}
         self["timestamp"] = ts
         self["user_action"] = action
         self["evidence"] = ev
