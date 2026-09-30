@@ -21,7 +21,7 @@ def build_parser():
     p.add_argument("--input-type", choices=("auto", "image", "dir"), default="auto")
     p.add_argument("--out-dir", "-o", default="cl_out", help="결과 출력 폴더")
     p.add_argument("--format", choices=("json", "csv", "both"), default="csv",
-                   help="csv=팀 공통 timeline.csv + recovered_conversations.csv (기본) / "
+                   help="csv=timeline.csv + recovered_conversations.csv (기본) / "
                         "json=result.json(전체 레코드·근거) / both")
     p.add_argument("--kinds", default=",".join(pipeline.DEFAULT_KINDS),
                    help="파싱할 아티팩트 종류 (쉼표구분): "
