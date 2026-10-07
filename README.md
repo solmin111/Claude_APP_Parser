@@ -122,6 +122,14 @@ CSV 는 UTF-8 BOM 으로 저장해 엑셀에서 바로 열린다. 시각은 KST,
 근거를 찾지 못한 행위는 행을 만들지 않는다. `User_behavior` 는 고정된 행위 분류표의
 이름만 쓴다 (`parser/events.py` 참조).
 
+`Behavior_details ` 는 `<행위>_<짧은 라벨>` 꼴의 요약만 담는다. 로그 원문·타임스탬프
+같은 긴 텍스트는 넣지 않는다 (원문은 `result.json` 의 `details`·`evidence.excerpt` 에 남는다).
+팀 공통 양식에 맞춘 것이다.
+
+한 번의 앱 실행이 하위 프로세스마다 Prefetch 를 남겨도 timeline 에는 한 행으로 합친다
+(가장 이른 것을 대표로, 라벨 `prefetch_run=1/N`, 합쳐진 시각은 `Artifact_details ` 의 `병합=`
+과 `result.json` 에 남는다). 서로 떨어진 실행은 각각 별개 행으로 둔다.
+
 **recovered_conversations.csv** — `Model` · `timestamp` · `conversation_uuid` ·
 `conversation_title` · `message_uuid` · `parent_message_uuid` · `message order` ·
 `role` · `content` · `Artifact_path`
@@ -138,6 +146,9 @@ CSV 는 UTF-8 BOM 으로 저장해 엑셀에서 바로 열린다. 시각은 KST,
 
 앱은 시스템 안내와 도구 결과도 발화자를 `user` 로 적어 저장한다. 그대로 실으면
 사용자가 한 말로 읽히므로 다시 판정한다.
+
+`role=unknown`(발화자·순서를 확인하지 못한 바이트 스캔 조각)은 CSV 에 싣지 않는다 —
+팀 공통 양식은 발화자가 확인된 메시지만 담는다. 이 조각들은 `result.json` 에만 남는다.
 
 산출물에는 대화 본문이 마스킹 없이 들어간다. 사건 자료로 취급한다.
 
@@ -242,6 +253,7 @@ python -m unittest discover -s tests -v
 | `tests/test_usn.py` | USN 선택 기준(순번 대조·새 하위 폴더·Codex 이름·다른 프로그램 프리패치 제외), 판정(실행·설치·삭제·첨부), 폴더 요약, USN 이 다른 실행을 확정으로 올리지 않음·같은 계보 제외 |
 | `tests/test_desktop_config.py` | `claude_desktop_config.json` 수집, MCP 인자·토큰·경로 비노출, 로그인 중복 행 없음, 깨진 JSON |
 | `tests/test_live.py` | 라이브 결과가 이미지 입력과 같은 행위·시각·판정인지, 원본 불변, 탐색 범위, 증거 안 출력 거부, 실행 중인 앱이 잡은 파일 읽기, 독점 잠금 파일 보고 |
+| `tests/test_output_format.py` | 팀 공통 양식 — Behavior_details 는 짧은 라벨만(로그 원문 제외), 대화 CSV 는 발화자 확인된 것만(unknown 제외), 같은 실행의 Prefetch 를 한 행으로 병합(먼 실행은 분리) |
 
 BitLocker 시험은 처음 실행할 때 `dissect.fve` 저장소의 BitLocker 테스트 볼륨(고정
 커밋, AGPL-3.0 데이터라 저장소에는 넣지 않음)을 `tests/_data/bde/` 로 내려받는다.
