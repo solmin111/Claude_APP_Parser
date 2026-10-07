@@ -68,10 +68,19 @@ def _corroborate(records):
             if r["user_action"]["confidence"] == model.CONF_CONFIRMED:
                 continue
             mine = (r.get("details") or {}).get("artifact")
+            lineage = (r.get("details") or {}).get("lineage")
             for t2, r2 in items:
                 if abs(t2 - t) > CORROBORATE_WINDOW:
                     continue
                 if (r2.get("details") or {}).get("artifact") in (None, mine):
+                    continue
+                # 같은 파일에서 나온 흔적(예: 프리패치 파일 시각과 그 파일의 USN 생성 기록)은
+                # 저장소가 달라 보여도 독립 근거가 아니다
+                if lineage and (r2.get("details") or {}).get("lineage") == lineage:
+                    continue
+                # USN 시각은 저널 기록 시각이라 행위 시각과 같다고 단정하지 않는다. 그래서 USN 은
+                # 다른 흔적에 의해 확인될 수는 있어도, 다른 행을 확인으로 올리는 근거가 되지 않는다
+                if (r2.get("details") or {}).get("artifact") == "usn_journal":
                     continue
                 r["user_action"]["confidence"] = model.CONF_CONFIRMED
                 r["user_action"]["rationale"] = (
@@ -417,7 +426,9 @@ def run(input_path, input_type="auto", kinds=DEFAULT_KINDS, max_excerpt=500,
             loc = {"path": "/$Extend/$UsnJrnl:$J", "partition_index": vd["index"],
                    "partition_offset_bytes": vd["offset_bytes"]}
             try:
-                info, recs_usn = usn_mod.read_journal(fs, max_bytes=usn_max_bytes)
+                info, recs_usn = usn_mod.read_journal(
+                    fs, max_bytes=usn_max_bytes,
+                    claude_dirs=getattr(vfs, "scanned_dirs", {}).get(vd["index"]))
             except Exception as exc:  # noqa: BLE001
                 usn_summary.append({**loc, "status": "not_found",
                                     "message": "%s: %s" % (type(exc).__name__, exc)})
