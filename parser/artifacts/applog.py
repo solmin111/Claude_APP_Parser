@@ -15,16 +15,18 @@ _TS = re.compile(r"(\d{4})[-/](\d{2})[-/](\d{2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
-# (정규식, event_id, 행위, 확신도)
+# (정규식, event_id, 행위, 확신도, 짧은 라벨)
+# 짧은 라벨은 Behavior_details 에 들어간다 — 팀 양식은 로그 원문이 아니라
+# 행위를 요약한 짧은 표현을 쓴다(예: chatgpt_desktop 의 '인증 상태 변경 로그_auth_changed').
 RULES = [
     (re.compile(r"Login-state transition.*?loggedOut:\s*true\s*(?:->|→)\s*false", re.I),
-     "E01-01", "로그인", model.CONF_CONFIRMED),
+     "E01-01", "로그인", model.CONF_CONFIRMED, "인증 상태 변경(로그인)"),
     (re.compile(r"Login-state transition.*?loggedOut:\s*false\s*(?:->|→)\s*true", re.I),
-     "E01-02", "로그아웃", model.CONF_CONFIRMED),
+     "E01-02", "로그아웃", model.CONF_CONFIRMED, "인증 상태 변경(로그아웃)"),
     (re.compile(r"beforeQuit|Shutdown signal received|going down", re.I),
-     "E08-02", "정상 종료", model.CONF_INFERRED),
+     "E08-02", "정상 종료", model.CONF_INFERRED, "종료 신호(앱 로그)"),
     (re.compile(r"app (?:started|ready)|Starting Claude|main window created", re.I),
-     "E08-01", "애플리케이션 실행", model.CONF_INFERRED),
+     "E08-01", "애플리케이션 실행", model.CONF_INFERRED, "실행 로그"),
 ]
 
 # 계정 전환: 한 줄에 이전 계정과 새 계정이 함께 적힌다
@@ -93,21 +95,26 @@ def parse(vfile, image, rb, max_excerpt=500):
 
         sw = _SWITCH.search(ln)
         matched = None
-        if sw and "login-state" in ln.lower():
+        # 계정 전환은 '이전 계정 ≠ 새 계정' 일 때만이다. 같은 계정이 X→X 로 다시 찍히는 것은
+        # (로그아웃 후) 동일 계정 재로그인이지 전환이 아니므로, 로그인/로그아웃 규칙으로 넘긴다.
+        if sw and "login-state" in ln.lower() and sw.group(1).lower() != sw.group(2).lower():
             det["account_uuid"] = sw.group(2)
             det["previous_account_uuid"] = sw.group(1)
-            matched = ("E01-03", "계정 전환", model.CONF_CONFIRMED)
+            matched = ("E01-03", "계정 전환", model.CONF_CONFIRMED, "계정 전환")
         else:
+            if sw and "login-state" in ln.lower():       # 동일 계정(X→X) — 계정만 남긴다
+                det["account_uuid"] = sw.group(2)
             lg = _LOGIN_UUID.search(ln)
             if lg:
                 det["account_uuid"] = lg.group(1)
-            for rx, eid, act, conf in RULES:
+            for rx, eid, act, conf, label in RULES:
                 if rx.search(ln):
-                    matched = (eid, act, conf)
+                    matched = (eid, act, conf, label)
                     break
         if matched is None:
             continue
-        eid, act, conf = matched
+        eid, act, conf, label = matched
+        det["summary"] = label      # Behavior_details 용 짧은 라벨(로그 원문은 log_body 에만)
         ts = model.timestamp(utc=utc, original=tm.group(0) if tm else None,
                              fmt="local_naive", meaning="로그 기록 시각",
                              source=model.TS_SOURCE_CONTENT, tz_note=tz_note,

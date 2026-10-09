@@ -43,9 +43,12 @@ _TAG = {"cache_block": "Cache", "idb_leveldb": "IndexedDB", "idb_blob": "Blob",
         "applog_shared": "App Log", "setuplog": "App Log", "prefetch": "Prefetch",
         "usn_journal": "USN"}
 # Behavior_details 에 넣을 핵심 내용을 고르는 순서.
-# identifiers 는 팀 매핑 규칙에 따라 식별자를 이 칸에 적기 위해 앞에 둔다.
-_CORE_KEYS = ("text", "prompt_text", "identifiers", "title", "model",
-              "file_name", "key", "log_body")
+# summary 는 아티팩트가 만든 짧은 라벨(앱 로그 요약, 프리패치 run 라벨)로 맨 앞에 둔다.
+# identifiers 는 팀 매핑 규칙에 따라 식별자를 이 칸에 적기 위해 앞쪽에 둔다.
+# log_body(로그 원문)는 넣지 않는다 — 팀 양식은 원문이 아니라 짧은 요약을 쓴다
+# (원문은 result.json 의 details.log_body·evidence.excerpt 에 그대로 남는다).
+_CORE_KEYS = ("summary", "text", "prompt_text", "identifiers", "title", "model",
+              "file_name", "key")
 
 EMPTY = "-"      # 팀 공통: 값이 없는 셀은 빈칸 대신 "-"
 
@@ -87,9 +90,16 @@ def _one_line(v, limit=300):
 
 
 def _winpath(r):
-    """이미지 내부 경로 '/Users/x/...' -> 'C:\\Users\\x\\...'"""
-    p = ((r.get("evidence") or {}).get("location") or {}).get("path") or ""
-    return "C:" + p.replace("/", "\\") if p else ""
+    """이미지 내부 경로 '/Users/x/...' -> '<드라이브>\\Users\\x\\...'
+
+    드라이브 문자 우선순위:
+      1) location.drive — 이미지: SYSTEM\\MountedDevices 로 확인된 볼륨별 실제 문자
+      2) location.live_root — 라이브: 실제로 읽은 위치 (D:\\ 를 분석했으면 D:\\Users\\…)
+      3) 'C:' — 하이브가 없거나 문자가 없는 파티션은 종전대로 가정
+    """
+    loc = (r.get("evidence") or {}).get("location") or {}
+    p = loc.get("path") or ""
+    return (loc.get("drive") or loc.get("live_root") or "C:") + p.replace("/", "\\") if p else ""
 
 
 def _behavior_details(r, titles):
@@ -113,11 +123,13 @@ def _artifact_details(r, titles):
           ("계정 UUID", det.get("account_uuid")),
           ("조직 UUID", det.get("org_uuid")),
           ("모델", det.get("model")),
-          ("위치", ev.get("locator")),
+          ("위치", det.get("run_label") or ev.get("locator")),
+          ("병합", det.get("merge_note")),
           ("MFT", loc.get("mft_record")),
           ("volume", "ntfs@%s" % loc["partition_offset_bytes"]
            if loc.get("partition_offset_bytes") is not None else None),
           ("삭제 엔트리", "True" if loc.get("allocated") is False else None),
+          ("수집", "live" if loc.get("time_source") else None),
           ("규칙", r["event"]["event_id"]),
           ("패키지", PACKAGE_NAME)]
     return "[%s] " % tag + ", ".join("%s=%s" % (k, _one_line(v, 120))
@@ -166,11 +178,12 @@ def write_timeline_csv(path, records):
 def write_conversations_csv(path, records):
     """역할이 확인된 메시지만 싣는다.
 
-    같은 (역할, 본문) 이 2초 안에 두 저장소에 있으면 먼저 온 것 1행만 남긴다.
-    부모는 같은 대화의 직전 메시지, 첫 메시지는 ROOT_PARENT.
+    중복은 '같은 대화의 같은 메시지가 두 저장소에 중복 수집된 것'만 접는다.
+    대화 UUID(와 메시지 UUID)를 키에 넣어, 서로 다른 대화의 동일 문구는 절대
+    합치지 않는다. 부모는 같은 대화의 직전 메시지, 첫 메시지는 ROOT_PARENT.
     """
     titles = _titles(records)
-    msgs, seen = [], {}
+    msgs, seen, seen_ids = [], {}, set()
     for r in records:
         det = r.get("details") or {}
         role = _ROLE.get((det.get("role") or "").lower())
@@ -178,15 +191,32 @@ def write_conversations_csv(path, records):
             continue
         if det.get("origin"):
             role = _ORIGIN_ROLE.get(det["origin"], role)
+        # 발화자가 확인되지 않은 바이트 스캔 조각(role=unknown)은 CSV 에 싣지 않는다.
+        # 팀 양식은 발화자·순서가 확인된 메시지만 담는다. 조각은 result.json 에만 남는다.
+        if role == "unknown":
+            continue
+        cid = det.get("conversation_uuid") or ""
+        muid = det.get("message_uuid")
         utc = r["timestamp"].get("utc")
-        key = (role, " ".join(det["text"].split()))
-        if any(u and utc and abs(_secs(u) - _secs(utc)) <= 2 for u in seen.get(key, ())):
-            continue
-        if key in seen and not utc:
-            continue
-        seen.setdefault(key, []).append(utc)
-        msgs.append((det.get("conversation_uuid") or "", utc or "", r["record_id"],
-                     role, det, r))
+        # 메시지 식별자가 있으면 (대화, 메시지) 로만 중복을 가린다 — 같은 대화의 같은
+        # 메시지가 두 저장소에 중복 수집된 경우에만 접히고, 다른 대화는 건드리지 않는다.
+        if muid:
+            idkey = (cid, muid)
+            if idkey in seen_ids:
+                continue
+            seen_ids.add(idkey)
+        else:
+            # 식별자가 없을 때(초안 등)만 (대화, 역할, 본문) 으로 폴백한다. 대화 UUID 를
+            # 반드시 포함해, 서로 다른 대화의 동일 문구가 섞이지 않게 한다.
+            key = (cid, role, " ".join(det["text"].split()))
+            times = seen.get(key)
+            if times is not None:
+                if any(u and utc and abs(_secs(u) - _secs(utc)) <= 2 for u in times):
+                    continue
+                if not utc:          # 같은 대화·역할·본문인데 시각이 없다 → 중복 조각
+                    continue
+            seen.setdefault(key, []).append(utc)
+        msgs.append((cid, utc or "", r["record_id"], role, det, r))
     msgs.sort(key=lambda m: (m[0], m[1], m[2]))
     with open(path, "w", encoding="utf-8-sig", newline="") as fh:
         w = _writer(fh)
