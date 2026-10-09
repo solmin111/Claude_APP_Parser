@@ -95,11 +95,15 @@ def parse(vfile, image, rb, max_excerpt=500):
 
         sw = _SWITCH.search(ln)
         matched = None
-        if sw and "login-state" in ln.lower():
+        # 계정 전환은 '이전 계정 ≠ 새 계정' 일 때만이다. 같은 계정이 X→X 로 다시 찍히는 것은
+        # (로그아웃 후) 동일 계정 재로그인이지 전환이 아니므로, 로그인/로그아웃 규칙으로 넘긴다.
+        if sw and "login-state" in ln.lower() and sw.group(1).lower() != sw.group(2).lower():
             det["account_uuid"] = sw.group(2)
             det["previous_account_uuid"] = sw.group(1)
             matched = ("E01-03", "계정 전환", model.CONF_CONFIRMED, "계정 전환")
         else:
+            if sw and "login-state" in ln.lower():       # 동일 계정(X→X) — 계정만 남긴다
+                det["account_uuid"] = sw.group(2)
             lg = _LOGIN_UUID.search(ln)
             if lg:
                 det["account_uuid"] = lg.group(1)

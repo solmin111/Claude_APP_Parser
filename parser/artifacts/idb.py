@@ -146,11 +146,34 @@ def parse(vfile, image, rb, max_excerpt=500):
                      "item_type": "message"}))
 
     # ── 2) 입력 초안 (전송 미확인) ─────────────────────────────────
+    seen_uploads = set()        # 같은 파일이 맨이름·윈도우경로·유닉스경로로 여러 번 → 한 건
     for text, off, anchor, snaps in _draft_texts(data):
         ts = model.timestamp(utc=mtime, original=mtime, meaning="파일 수정 시각(대체)",
                              source=model.TS_SOURCE_MFT,
                              tz_note="초안 자체에 시각이 없어 파일 수정 시각으로 대체",
                              null_reason=None if mtime else "파일 시각 없음")
+        # 초안이 파일 경로/파일명 한 덩어리면 업로드 대상 참조다 → 업로드(의심)로 올린다.
+        up = _upload_of(text)
+        if up:
+            base = re.split(r"[\\/]", text.strip())[-1]
+            if base.lower() in seen_uploads:
+                continue                        # 동일 파일 중복 초안 — 접는다
+            seen_uploads.add(base.lower())
+            eid, act = up
+            out.append(model.Record(
+                rb.next_id(), eid, events.name(eid), ts,
+                model.user_action(act, model.CONF_INFERRED,
+                                  rationale="입력창 초안에 업로드 대상 파일(%s) 경로/파일명만 "
+                                            "남음 — 첨부로 올린 파일로 보이나 전송은 미확인" % base),
+                model.evidence(image, vfile,
+                               locator="offset=%d(chat-draft upload)" % off,
+                               excerpt=excerpt(text, max_excerpt)),
+                details={"artifact": kind, "text": text, "role": "user",
+                         "item_type": "upload_ref", "file_name": base,
+                         "key": anchor, "snapshots": snaps,
+                         "parent_message_uuid": ROOT_PARENT,
+                         "conversation_uuid": "draft:%s" % vfile.path.rsplit("/", 1)[-1]}))
+            continue
         out.append(model.Record(
             rb.next_id(), "E04-01", events.name("E04-01"), ts,
             model.user_action("사용자 프롬프트 입력/전송", model.CONF_INFERRED,
@@ -199,6 +222,27 @@ _ATTACH = re.compile(r"<uploaded_files>|첨부|업로드", re.I)
 _IMAGE_REQ = re.compile(r"그려\s*줘|이미지.{0,6}(만들|생성)|그림.{0,6}(그려|만들)", re.I)
 _DOC_EXT = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|hwpx?|txt|csv)\b", re.I)
 _IMG_EXT = re.compile(r"\.(png|jpe?g|gif|webp|bmp|svg)\b", re.I)
+
+
+# 초안 한 줄이 '파일 경로/파일명 한 덩어리'(공백 없는 단일 토큰)면, 그것은 입력창에
+# 올려 둔 업로드 대상 파일 참조다. 문장(공백 포함)은 걸리지 않는다.
+#   예) report.pdf  ·  C:\\Users\\x\\내부자료\\a.pdf  ·  /mnt/user-data/uploads/a.pdf
+_UPLOAD_REF = re.compile(
+    r"^\S+\.(?P<ext>pdf|docx?|xlsx?|pptx?|hwpx?|txt|csv"
+    r"|png|jpe?g|gif|webp|bmp|svg)$", re.I)
+
+
+def _upload_of(text):
+    """초안 전체가 단일 파일 경로/파일명이면 업로드 참조로 본다. 아니면 None."""
+    s = (text or "").strip()
+    if not s or len(s) > 260 or "\n" in s:
+        return None
+    m = _UPLOAD_REF.match(s)
+    if not m:
+        return None
+    if m.group("ext").lower() in ("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"):
+        return "E05-01", "이미지 업로드"
+    return "E05-03", "문서 업로드"
 
 
 def _event_of(text):
