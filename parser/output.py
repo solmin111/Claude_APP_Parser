@@ -178,11 +178,12 @@ def write_timeline_csv(path, records):
 def write_conversations_csv(path, records):
     """역할이 확인된 메시지만 싣는다.
 
-    같은 (역할, 본문) 이 2초 안에 두 저장소에 있으면 먼저 온 것 1행만 남긴다.
-    부모는 같은 대화의 직전 메시지, 첫 메시지는 ROOT_PARENT.
+    중복은 '같은 대화의 같은 메시지가 두 저장소에 중복 수집된 것'만 접는다.
+    대화 UUID(와 메시지 UUID)를 키에 넣어, 서로 다른 대화의 동일 문구는 절대
+    합치지 않는다. 부모는 같은 대화의 직전 메시지, 첫 메시지는 ROOT_PARENT.
     """
     titles = _titles(records)
-    msgs, seen = [], {}
+    msgs, seen, seen_ids = [], {}, set()
     for r in records:
         det = r.get("details") or {}
         role = _ROLE.get((det.get("role") or "").lower())
@@ -194,15 +195,28 @@ def write_conversations_csv(path, records):
         # 팀 양식은 발화자·순서가 확인된 메시지만 담는다. 조각은 result.json 에만 남는다.
         if role == "unknown":
             continue
+        cid = det.get("conversation_uuid") or ""
+        muid = det.get("message_uuid")
         utc = r["timestamp"].get("utc")
-        key = (role, " ".join(det["text"].split()))
-        if any(u and utc and abs(_secs(u) - _secs(utc)) <= 2 for u in seen.get(key, ())):
-            continue
-        if key in seen and not utc:
-            continue
-        seen.setdefault(key, []).append(utc)
-        msgs.append((det.get("conversation_uuid") or "", utc or "", r["record_id"],
-                     role, det, r))
+        # 메시지 식별자가 있으면 (대화, 메시지) 로만 중복을 가린다 — 같은 대화의 같은
+        # 메시지가 두 저장소에 중복 수집된 경우에만 접히고, 다른 대화는 건드리지 않는다.
+        if muid:
+            idkey = (cid, muid)
+            if idkey in seen_ids:
+                continue
+            seen_ids.add(idkey)
+        else:
+            # 식별자가 없을 때(초안 등)만 (대화, 역할, 본문) 으로 폴백한다. 대화 UUID 를
+            # 반드시 포함해, 서로 다른 대화의 동일 문구가 섞이지 않게 한다.
+            key = (cid, role, " ".join(det["text"].split()))
+            times = seen.get(key)
+            if times is not None:
+                if any(u and utc and abs(_secs(u) - _secs(utc)) <= 2 for u in times):
+                    continue
+                if not utc:          # 같은 대화·역할·본문인데 시각이 없다 → 중복 조각
+                    continue
+            seen.setdefault(key, []).append(utc)
+        msgs.append((cid, utc or "", r["record_id"], role, det, r))
     msgs.sort(key=lambda m: (m[0], m[1], m[2]))
     with open(path, "w", encoding="utf-8-sig", newline="") as fh:
         w = _writer(fh)

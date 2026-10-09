@@ -80,6 +80,16 @@ class VfsFile:
         return loc
 
 
+def _abort_reason(volumes, locked):
+    """분석을 멈출지 결정한다. 읽을 수 있는 NTFS 볼륨이 하나라도 있으면 멈추지
+    않는다(None) — 잠긴 파티션이 함께 있어도 그 볼륨들은 분석한다. 읽을 수 있는
+    볼륨이 하나도 없을 때만, 잠긴 볼륨이 있으면 'locked', 아니면 'unsupported'.
+    """
+    if volumes:
+        return None
+    return "locked" if locked else "unsupported"
+
+
 class TskImageVfs:
     """디스크 이미지의 NTFS 볼륨에서 SCAN_ROOTS 하위 파일을 열거 (삭제 엔트리 포함)."""
 
@@ -129,12 +139,16 @@ class TskImageVfs:
             vd.update(filesystem="NTFS", cluster_size=fs.info.block_size)
             self.volumes.append((vd, fs))
 
-        # 잠긴 볼륨이 있는데 하나도 못 풀었으면 여기서 멈춘다. 복구 파티션 같은 평문 NTFS
-        # 만 읽고 "아티팩트 없음 = 앱 미사용" 으로 읽히는 결과를 내지 않기 위해서다.
-        # 평문 OS 볼륨 + 잠긴 데이터 볼륨 조합도 같이 멈춘다 (키를 주면 풀린다).
-        if self.locked and not any("unlock_method" in vd for vd, _fs in self.volumes):
+        # 읽을 수 있는 NTFS 볼륨이 하나라도 있으면(평문이든 BitLocker 해제든) 그것을
+        # 분석한다. 잠긴 파티션이 함께 있어도 그 때문에 전체를 멈추지 않는다 — 이미지
+        # 안에 실제 내용이 있는데 "아티팩트 없음 = 앱 미사용" 으로 오판되지 않게 한다.
+        # 잠긴 볼륨은 경고·제한 사항으로 크게 남긴다(호출부 pipeline 이 warnings 로 싣는다).
+        # 읽을 수 있는 볼륨이 하나도 없을 때만 멈춘다: 잠긴 볼륨이 있으면 VOLUME_LOCKED
+        # (키를 주면 풀린다), 아니면 포맷 미지원.
+        reason = _abort_reason(self.volumes, self.locked)
+        if reason == "locked":
             raise VolumeLockedError(self.locked[0]["reason"], volumes=self.locked)
-        if not self.volumes:
+        if reason == "unsupported":
             raise UnsupportedFormatError(
                 "이미지에서 판독 가능한 NTFS 볼륨을 찾지 못했습니다",
                 partitions=[{"offset_bytes": p[0], "type": p[2]} for p in parts],

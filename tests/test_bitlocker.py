@@ -167,17 +167,28 @@ class EndToEnd(_TmpDir):
         self.assertEqual(code, 2)
         self.assertIn("recovery: / passphrase: / bek: / fvek:", json.loads(err)["message"])
 
-    def test_plain_volume_beside_locked_volume_stops(self):
-        """평문 NTFS 만 읽고 결론 내리지 않는다 — 잠긴 볼륨이 있으면 키를 요구한다."""
+    def test_plain_volume_beside_locked_volume_proceeds(self):
+        """읽을 수 있는 평문 NTFS 가 있으면, 잠긴 BitLocker 볼륨이 함께 있어도 분석을
+        멈추지 않는다(QA 2.4). 잠긴 볼륨은 결과에 제한 사항(locked_volumes)으로 남긴다.
+        읽을 수 있는 볼륨이 하나도 없을 때만 VOLUME_LOCKED 로 멈춘다."""
         vol, key = volume("recovery")
         img = self.write("two.dd", bde_fixture.mbr_disk(bde_fixture.plain_ntfs(), vol))
-        code, _o, err = run_cli("-i", img, "-o", os.path.join(self.tmp, "out"))
-        self.assertEqual(code, 2)
-        self.assertEqual(json.loads(err)["code"], "VOLUME_LOCKED")
-        out = os.path.join(self.tmp, "out2")
-        code, _o, err = run_cli("-i", img, "-o", out, "--format", "json", "--key-material", key)
+        # 키 없이도 평문 볼륨을 읽어 진행한다 (예전엔 전체 중단 → 바뀜).
+        out = os.path.join(self.tmp, "out")
+        code, _o, err = run_cli("-i", img, "-o", out, "--format", "both")
         self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.exists(os.path.join(out, "timeline.csv")))   # 진행함
         with open(os.path.join(out, "result.json"), encoding="utf-8") as fh:
+            fs = json.load(fh)["filesystem"]
+        self.assertEqual([v.get("encryption") for v in fs["volumes"]], [None])  # 평문 1개 분석
+        self.assertTrue(fs["locked_volumes"])                                   # 잠김 = 제한사항
+        self.assertEqual(fs["locked_volumes"][0]["encryption"], "BitLocker")
+        self.assertIn("reason", fs["locked_volumes"][0])
+        # 키를 주면 둘 다 분석된다.
+        out2 = os.path.join(self.tmp, "out2")
+        code, _o, err = run_cli("-i", img, "-o", out2, "--format", "json", "--key-material", key)
+        self.assertEqual(code, 0, err)
+        with open(os.path.join(out2, "result.json"), encoding="utf-8") as fh:
             vols = json.load(fh)["filesystem"]["volumes"]
         self.assertEqual([v.get("encryption") for v in vols], [None, "BitLocker"])
 

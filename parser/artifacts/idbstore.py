@@ -244,6 +244,25 @@ def _opened_records(harvest, vfile, image, rb):
     return out
 
 
+def _source_for(written, leveldb_dir, fallback):
+    """이 LevelDB 디렉터리를 만든 원본 파일(VfsFile)을 되짚는다.
+
+    한 DB 는 여러 파일(000003.log·*.ldb·MANIFEST…)로 이뤄지므로, 그 DB 디렉터리
+    바로 아래에서 전개된 파일들을 모아 .log 를 대표로 둔다(없으면 첫 파일).
+    그래야 서로 다른 저장소·사용자의 메시지가 각자 자기 파일에서 나온 것으로
+    기록된다 — 예전처럼 전부 하나의 대표 파일(anchor)로 뭉뚱그리지 않는다.
+    """
+    nd = os.path.normcase(leveldb_dir)
+    here = [vf for vf, out in written
+            if os.path.normcase(os.path.dirname(out)) == nd]
+    if not here:                       # 하위(blob 등)까지 접두로 느슨히 매칭
+        pre = nd + os.sep
+        here = [vf for vf, out in written if os.path.normcase(out).startswith(pre)]
+    if not here:
+        return fallback
+    return next((v for v in here if v.path.lower().endswith(".log")), here[0])
+
+
 def parse_group(vfiles, image, rb, max_excerpt=500, say=None):
     """
     IndexedDB 파일 묶음을 정식 파서로 읽는다. -> (레코드, 요약)
@@ -268,6 +287,7 @@ def parse_group(vfiles, image, rb, max_excerpt=500, say=None):
         note("IndexedDB 정식 파싱 — 파일 %d건 전개" % len(written))
         anchor = next((v for v in vfiles if v.path.lower().endswith(".log")), vfiles[0])
         for leveldb_dir, blob_dir in idbtree.db_pairs(dirs):
+            src = _source_for(written, leveldb_dir, anchor)   # 이 DB 의 원본 파일로 기록
             db = idbtree.open_db(leveldb_dir, blob_dir)
             if db is None:
                 summary["databases"].append({"dir": os.path.basename(leveldb_dir),
@@ -294,10 +314,10 @@ def parse_group(vfiles, image, rb, max_excerpt=500, say=None):
             note("  %s — 메시지 %d건(사용자 %d) · 대화 %d건"
                  % (os.path.basename(leveldb_dir), len(h["messages"]), n_user,
                     len(h["conversations"])))
-            records.extend(_message_records(h, anchor, image, rb, max_excerpt))
-            records.extend(_branch_records(h, anchor, image, rb, max_excerpt))
-            records.extend(_conversation_records(h, anchor, image, rb, max_excerpt))
-            records.extend(_opened_records(h, anchor, image, rb))
+            records.extend(_message_records(h, src, image, rb, max_excerpt))
+            records.extend(_branch_records(h, src, image, rb, max_excerpt))
+            records.extend(_conversation_records(h, src, image, rb, max_excerpt))
+            records.extend(_opened_records(h, src, image, rb))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return records, summary
