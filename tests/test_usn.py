@@ -1,13 +1,3 @@
-"""USN 저널 — Claude Desktop 기준 선택·판정 검증.
-
-이전 모듈은 ChatGPT Codex 파일 이름(auth.json·rollout-*.jsonl …)을 골라 Claude 결과에
-'로그아웃'·'새 대화 생성' 을 만들 수 있었다. 이 시험은
-  양성  Claude 폴더 안 첨부 저장·Claude 프리패치·패키지 폴더 -> 기대한 레코드
-  음성  Codex 이름·다른 프로그램 프리패치·MFT 재사용(순번 다름) -> 고르지 않음/행위 없음
-  중복  같은 프리패치 계보·USN 근거로 다른 행을 확정으로 올리지 않음
-  시각  USN 기록 시각을 그대로 (지어내지 않음)
-"""
-
 import os
 import struct
 import sys
@@ -34,7 +24,6 @@ def filetime(iso):
 
 
 def rec_v2(name, mft, seq, pmft, pseq, reasons, iso="2026-10-02T03:29:07", directory=False, usn_no=1):
-    """USN_RECORD_V2 바이트 하나."""
     nm = name.encode("utf-16-le")
     length = (60 + len(nm) + 7) // 8 * 8
     mask = 0
@@ -65,7 +54,7 @@ def key(recs, eid=None):
 class Selection(unittest.TestCase):
     def test_parent_must_match_mft_and_sequence(self):
         hits = select(rec_v2("config.json", 500, 1, 100, 3, ["FILE_CREATE"]),
-                      rec_v2("dispex.dll", 501, 9, 100, 4, ["FILE_CREATE"]))   # 같은 MFT, 다른 순번 = 재사용
+                      rec_v2("dispex.dll", 501, 9, 100, 4, ["FILE_CREATE"]))
         self.assertEqual([h["name"] for h in hits], ["config.json"])
         self.assertEqual(hits[0]["parent_path"], CLAUDE)
 
@@ -76,9 +65,9 @@ class Selection(unittest.TestCase):
         self.assertEqual(hits[-1]["parent_path"], IDB + "/https_claude.ai_0.indexeddb.blob/1")
 
     def test_codex_and_other_programs_are_not_selected(self):
-        hits = select(rec_v2("auth.json", 700, 1, 999, 1, ["FILE_DELETE"]),          # Codex 로그아웃 지문
+        hits = select(rec_v2("auth.json", 700, 1, 999, 1, ["FILE_DELETE"]),
                       rec_v2("rollout-2026.jsonl", 701, 1, 999, 1, ["FILE_CREATE"]),
-                      rec_v2("CHROME.EXE-1A2B3C4D.pf", 702, 1, 200, 5, ["FILE_CREATE"]),  # 프리패치 폴더 자체는 제외
+                      rec_v2("CHROME.EXE-1A2B3C4D.pf", 702, 1, 200, 5, ["FILE_CREATE"]),
                       rec_v2("app.dll", 703, 1, 300, 2, ["FILE_CREATE"]))
         self.assertEqual(hits, [])
 
@@ -102,7 +91,6 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(len(key(recs, "E02-01")), 2)
 
     def test_package_folder_delete_is_not_called_uninstall(self):
-        """버전 업데이트도 옛 버전 폴더를 지운다 — 앱 삭제로 단정하지 않는다."""
         (r,) = key(records(rec_v2("Claude_1.2.3.0_x64__pzs8sxrjxfjjc", 811, 1, 300, 2, ["FILE_DELETE"], directory=True)))
         self.assertEqual((r["event"]["event_id"], r["details"]["candidate_event"]), ("NA-00", "E02-02"))
 
@@ -141,7 +129,6 @@ def rec(eid, artifact, iso, lineage=None, conf=model.CONF_INFERRED):
 
 class Corroboration(unittest.TestCase):
     def test_usn_does_not_lift_another_run(self):
-        """다른 프리패치 파일의 USN 생성 기록(110초 차)으로 다른 실행을 확정하지 않는다 (실측 사례)."""
         pf = rec("E08-01", "prefetch", "2026-10-02T03:24:03", "prefetch:CLAUDE.EXE-6DBE244D.PF")
         u = rec("E08-01", "usn_journal", "2026-10-02T03:22:13", "prefetch:CLAUDE.EXE-6DBE243F.PF")
         pipeline._corroborate([pf, u])
@@ -150,7 +137,7 @@ class Corroboration(unittest.TestCase):
     def test_same_lineage_is_not_independent(self):
         pf = rec("E08-01", "prefetch", "2026-10-02T03:22:13", "prefetch:CLAUDE.EXE-6DBE243F.PF")
         u = rec("E08-01", "usn_journal", "2026-10-02T03:22:13", "prefetch:CLAUDE.EXE-6DBE243F.PF")
-        log = rec("E08-02", "applog", "2026-10-02T03:22:13")          # 다른 행위 — 상관없음
+        log = rec("E08-02", "applog", "2026-10-02T03:22:13")
         pipeline._corroborate([pf, u, log])
         self.assertEqual((pf["user_action"]["confidence"], u["user_action"]["confidence"]),
                          (model.CONF_INFERRED, model.CONF_INFERRED))

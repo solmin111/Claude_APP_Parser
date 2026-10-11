@@ -1,11 +1,3 @@
-"""BitLocker 이미지 입력 검증.
-
-  python -m unittest discover -s tests -v
-
-BitLocker 테스트 볼륨(dissect.fve 공개 데이터)을 처음 한 번 내려받는다. 내려받지 못하면
-(오프라인) 볼륨이 필요한 시험은 건너뛰고 그 사실을 출력한다.
-"""
-
 import contextlib
 import csv
 import io
@@ -29,7 +21,6 @@ from parser.vfs import TskImageVfs  # noqa: E402
 
 WRONG_RECOVERY = "recovery:111111-222222-333333-444444-555555-666666-777777-888888"
 
-# 평문 NTFS 에서 나와야 하는 행 (Timestamp, User_behavior, Verdict, Artifact_path)
 EXPECTED_ROWS = [
     ("2026-09-23 13:03:58.000000 KST", "애플리케이션 실행", "의심",
      r"C:\Users\tester\AppData\Local\Claude\logs\main.log"),
@@ -54,7 +45,6 @@ def setUpModule():
 
 
 def volume(method):
-    """method 로 풀리는 BitLocker 볼륨 (안에 합성 Claude NTFS). 같은 실행 안에서는 한 번만 만든다."""
     if _FETCH_ERROR:
         raise unittest.SkipTest(_FETCH_ERROR)
     if method not in _CACHE:
@@ -63,7 +53,6 @@ def volume(method):
 
 
 def run_cli(*args, env=None):
-    """cli.main 을 돌려 (종료코드, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
     with mock.patch.dict(os.environ, env or {}, clear=False), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -98,7 +87,6 @@ class SelfCheck(unittest.TestCase):
 
 
 class PlainImageUnchanged(_TmpDir):
-    """평문 이미지는 BitLocker 처리가 끼어도 결과가 그대로여야 한다."""
 
     def test_plain_ntfs(self):
         img = self.write("plain.dd", bde_fixture.mbr_disk(bde_fixture.plain_ntfs()))
@@ -127,10 +115,8 @@ class EndToEnd(_TmpDir):
         vd = result["filesystem"]["volumes"][0]
         self.assertEqual((vd["encryption"], vd["unlock_method"]), ("BitLocker", "recovery"))
         self.assertTrue(vd["protectors"]["recovery_password"])
-        # 키 값은 결과 어디에도 남지 않는다
         self.assertNotIn(bde_fixture.RECOVERY, raw)
         self.assertNotIn(bde_fixture.RECOVERY, stdout + err)
-        # 탐색 경로(SCAN_ROOTS) 밖의 다른 제품(~/.claude) 은 열거하지도 않는다
         self.assertEqual(result["scan"]["files_scanned"], 2)
 
     def test_key_from_environment(self):
@@ -141,7 +127,6 @@ class EndToEnd(_TmpDir):
         self.assertEqual(timeline_rows(out), EXPECTED_ROWS)
 
     def test_no_key_is_locked_not_empty(self):
-        """키가 없으면 '아티팩트 없음' 이 아니라 잠김으로 멈춘다 (오탐·미탐 방지)."""
         img, _key = self.disk()
         out = os.path.join(self.tmp, "out")
         code, _o, err = run_cli("-i", img, "-o", out)
@@ -168,23 +153,18 @@ class EndToEnd(_TmpDir):
         self.assertIn("recovery: / passphrase: / bek: / fvek:", json.loads(err)["message"])
 
     def test_plain_volume_beside_locked_volume_proceeds(self):
-        """읽을 수 있는 평문 NTFS 가 있으면, 잠긴 BitLocker 볼륨이 함께 있어도 분석을
-        멈추지 않는다(QA 2.4). 잠긴 볼륨은 결과에 제한 사항(locked_volumes)으로 남긴다.
-        읽을 수 있는 볼륨이 하나도 없을 때만 VOLUME_LOCKED 로 멈춘다."""
         vol, key = volume("recovery")
         img = self.write("two.dd", bde_fixture.mbr_disk(bde_fixture.plain_ntfs(), vol))
-        # 키 없이도 평문 볼륨을 읽어 진행한다 (예전엔 전체 중단 → 바뀜).
         out = os.path.join(self.tmp, "out")
         code, _o, err = run_cli("-i", img, "-o", out, "--format", "both")
         self.assertEqual(code, 0, err)
-        self.assertTrue(os.path.exists(os.path.join(out, "timeline.csv")))   # 진행함
+        self.assertTrue(os.path.exists(os.path.join(out, "timeline.csv")))
         with open(os.path.join(out, "result.json"), encoding="utf-8") as fh:
             fs = json.load(fh)["filesystem"]
-        self.assertEqual([v.get("encryption") for v in fs["volumes"]], [None])  # 평문 1개 분석
-        self.assertTrue(fs["locked_volumes"])                                   # 잠김 = 제한사항
+        self.assertEqual([v.get("encryption") for v in fs["volumes"]], [None])
+        self.assertTrue(fs["locked_volumes"])
         self.assertEqual(fs["locked_volumes"][0]["encryption"], "BitLocker")
         self.assertIn("reason", fs["locked_volumes"][0])
-        # 키를 주면 둘 다 분석된다.
         out2 = os.path.join(self.tmp, "out2")
         code, _o, err = run_cli("-i", img, "-o", out2, "--format", "json", "--key-material", key)
         self.assertEqual(code, 0, err)
@@ -194,11 +174,10 @@ class EndToEnd(_TmpDir):
 
 
 class UnlockMethods(_TmpDir):
-    """해제 방식별로 볼륨이 열리고 Claude 파일이 보이는지 (파이프라인 아래 층)."""
 
     def files(self, method, key_material):
         vol, _key = volume(method)
-        img = open_image(self.write("v.dd", vol))      # 파티션 테이블 없는 볼륨 이미지
+        img = open_image(self.write("v.dd", vol))
         self.addCleanup(img.close)
         vfs = TskImageVfs(img, key_material=key_material)
         return vfs, sorted(f.path for f in vfs.iter_files())

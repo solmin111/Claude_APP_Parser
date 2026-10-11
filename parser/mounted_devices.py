@@ -1,17 +1,7 @@
-"""이미지의 각 NTFS 볼륨이 원래 PC 에서 어떤 드라이브 문자였는지 — SYSTEM 하이브의 MountedDevices 로 알아낸다.
-
-파일시스템 자체에는 드라이브 문자가 없다. 부팅한 Windows 가 `HKLM\\SYSTEM\\MountedDevices` 에
-`\\DosDevices\\C:` = 볼륨 식별자 로 기록해 두므로, 그 값을 이미지의 파티션과 맞춘다.
-  MBR 디스크: 디스크 서명(섹터 0 의 0x1B8, 4바이트) + 파티션 시작 오프셋(바이트, u64 LE) = 12바이트
-  GPT 디스크: b"DMIO:ID:" + 파티션 고유 GUID(GPT 엔트리의 16바이트 그대로) = 24바이트
-하이브는 표준 라이브러리만으로 읽는다 (regf 의 nk/vk/lf/lh/li/ri 셀 중 이 키 하나를 찾는 데 필요한 만큼만).
-트랜잭션 로그(.LOG1/.LOG2)는 적용하지 않는다 — MountedDevices 는 드라이브 구성이 바뀔 때만 변하므로 보통 하이브 본문과 같다.
-"""
-
 import struct
 
 HIVE_PATH = "/Windows/System32/config/SYSTEM"
-_HBIN = 0x1000                      # 첫 hbin 의 파일 오프셋. 셀 오프셋은 모두 여기 기준
+_HBIN = 0x1000
 _PREFIX = "\\dosdevices\\"
 _NONE = 0xFFFFFFFF
 
@@ -71,7 +61,6 @@ def _values(buf, nk_off):
 
 
 def mounted_devices(hive):
-    """SYSTEM 하이브 바이트 → {'C:': 볼륨 식별자 bytes, ...} (\\DosDevices\\X: 값만)."""
     if hive[:4] != b"regf":
         raise ValueError("regf 서명이 아님")
     nk = _find_key(hive, struct.unpack_from("<I", hive, 0x24)[0], ["MountedDevices"])
@@ -82,7 +71,6 @@ def mounted_devices(hive):
 
 
 def volume_key(img, scheme, sector, offset):
-    """이미지의 파티션(시작 오프셋 바이트) → MountedDevices 가 쓰는 볼륨 식별자. 못 만들면 None."""
     if scheme == "MBR":
         return img.read(0x1B8, 4) + struct.pack("<Q", offset)
     if scheme == "GPT":
@@ -109,20 +97,19 @@ def _read_all(f):
 
 
 def assign(img, scheme, sector, volumes):
-    """volumes: [(vd, fs)]. SYSTEM 하이브를 찾아 각 vd 에 'drive' 를 채운다. 반환: 근거 설명 (filesystem.drive_letters)."""
     hive = src = None
     for vd, fs in volumes:
         try:
             hive, src = _read_all(fs.open(HIVE_PATH)), vd["index"]
             break
-        except Exception:  # noqa: BLE001 — 이 볼륨에는 없음 (데이터·복구 파티션)
+        except Exception:  # noqa: BLE001
             continue
     if hive is None:
-        return {"status": "SYSTEM 하이브 없음 — Artifact_path 의 드라이브 문자는 C: 로 가정"}
+        return {"status": "SYSTEM 하이브 없음, Artifact_path 의 드라이브 문자는 C: 로 가정"}
     try:
         by_key = {data: letter for letter, data in mounted_devices(hive).items()}
     except Exception as exc:  # noqa: BLE001
-        return {"status": "SYSTEM 하이브 판독 실패 (%s) — 드라이브 문자는 C: 로 가정" % str(exc)[:100]}
+        return {"status": "SYSTEM 하이브 판독 실패 (%s), 드라이브 문자는 C: 로 가정" % str(exc)[:100]}
     found = {}
     for vd, _fs in volumes:
         key = volume_key(img, scheme, sector, vd["offset_bytes"])
@@ -137,7 +124,6 @@ def assign(img, scheme, sector, volumes):
 
 
 def _synthetic_hive():
-    """자체 검사용 최소 regf: ROOT ─ lf ─ {Select, MountedDevices(vk ×3)}."""
     cells = bytearray()
 
     def add(data):
@@ -160,7 +146,7 @@ def _synthetic_hive():
         b = bytearray(0x14)
         b[0:2] = b"vk"
         struct.pack_into("<H", b, 2, len(name))
-        if len(data) <= 4:                                   # 실제 하이브처럼 4바이트 이하는 오프셋 자리에 inline
+        if len(data) <= 4:
             struct.pack_into("<I", b, 4, 0x80000000 | len(data))
             b[8:12] = data.ljust(4, b"\0")
         else:
@@ -183,7 +169,7 @@ def _synthetic_hive():
     return bytes(hdr) + body + b"\0" * (-len(body) % _HBIN)
 
 
-if __name__ == "__main__":  # python -m cxparser.mounted_devices — 자체 검사
+if __name__ == "__main__":
     md = mounted_devices(_synthetic_hive())
     assert md == {"C:": b"\x11\x22\x33\x44" + struct.pack("<Q", 227540992), "D:": b"DMIO:ID:" + bytes(range(16))}, md
 

@@ -1,9 +1,3 @@
-"""명령행 인터페이스.
-
-  python -m parser --input <image.E01|image.dd|디렉터리> --out-dir <결과폴더>
-  python -m parser --input-type live --out-dir <결과폴더>     (실행 중인 이 PC 를 직접 분석)
-"""
-
 import argparse
 import json
 import os
@@ -49,7 +43,6 @@ def build_parser():
                    help="진행 상황을 단계별로 출력한다")
     p.add_argument("--no-banner", action="store_true", help="시작 배너 생략")
     p.add_argument("--quiet", action="store_true")
-    # 통합기(parsers.json)가 파서 버전을 읽어 실행 기록에 남긴다.
     p.add_argument("--version", action="version",
                    version="parser %s" % __version__)
     return p
@@ -59,12 +52,6 @@ OUTPUT_FILES = ("result.json", "timeline.csv", "recovered_conversations.csv")
 
 
 def _utf8_console():
-    """콘솔을 UTF-8 로 맞춘다.
-
-    Windows 기본 콘솔은 CP949 라서 한글 진행 메시지에 '—' 같은 글자가 섞이면
-    출력이 예외로 죽는다. 사용자가 실행 전에 chcp 65001 을 치게 하지 않고
-    파서가 스스로 맞춘다. 실패해도 파싱은 계속한다(치환 출력).
-    """
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -80,12 +67,11 @@ def _utf8_console():
 
 
 def _inside_live_evidence(out_dir, live_root):
-    """출력 폴더가 라이브 탐색 경로(SCAN_ROOTS) 안이면 True — 결과를 증거 안에 쓰지 않는다."""
     out = os.path.normcase(os.path.abspath(out_dir))
     root = os.path.normcase(os.path.abspath(live_root))
     try:
         rel = os.path.relpath(out, root)
-    except ValueError:                       # 다른 드라이브
+    except ValueError:
         return False
     if rel.startswith(".."):
         return False
@@ -112,7 +98,7 @@ def main(argv=None):
         print(banner.render())
 
     if args.input_type == "live" and _inside_live_evidence(args.out_dir, args.input):
-        print("출력 폴더가 분석 대상(Claude 저장 경로) 안에 있습니다 — 다른 곳을 지정하세요: %s"
+        print("출력 폴더가 분석 대상(Claude 저장 경로) 안에 있습니다. 다른 곳을 지정하세요: %s"
               % os.path.abspath(args.out_dir), file=sys.stderr)
         return 2
 

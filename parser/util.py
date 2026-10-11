@@ -1,5 +1,3 @@
-"""시각 해석, 발췌, 민감정보 마스킹 유틸."""
-
 import re
 from datetime import datetime, timezone
 
@@ -9,14 +7,12 @@ _ISO_RE = re.compile(
 
 
 def parse_any_time(value):
-    """다양한 표기의 시각을 UTC ISO8601 로. 반환 (iso|None, format_desc, note)."""
     if value is None:
         return None, None, "값 없음"
     if isinstance(value, bool):
         return None, None, "불리언 값은 시각이 아님"
     if isinstance(value, (int, float)):
         v = float(value)
-        # epoch 초 / 밀리초 / 마이크로초 자동 판별 (1990~2100 범위로 검증)
         for div, desc in ((1.0, "epoch_seconds"), (1e3, "epoch_milliseconds"),
                           (1e6, "epoch_microseconds"), (1e9, "epoch_nanoseconds")):
             try:
@@ -35,7 +31,6 @@ def parse_any_time(value):
         tz = m.group(8)
         base = s
         if tz is None:
-            # 타임존 표기 없음 — UTC 로 단정하지 않고 naive 로 보존
             return None, "ISO8601_naive", (
                 "타임존 표기가 없어 UTC 로 단정하지 않음 (원본값 보존)")
         norm = base.replace("Z", "+00:00")
@@ -61,10 +56,9 @@ def excerpt(text, limit=500):
     text = text.replace("\r", " ").replace("\n", " ")
     if len(text) <= limit:
         return text
-    return text[:limit] + "…[%d자 중 %d자]" % (len(text), limit)
+    return text[:limit] + "...[%d자 중 %d자]" % (len(text), limit)
 
 
-# --- 민감정보 마스킹 -------------------------------------------------------
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}")
 _SK_RE = re.compile(r"\b(sk-[A-Za-z0-9_\-]{16,})")
 _BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._\-]{16,}")
@@ -78,7 +72,6 @@ _SENSITIVE_KEYS = {
 
 
 def mask_text(text):
-    """로그·출력용 문자열에서 토큰/키를 마스킹."""
     if not isinstance(text, str):
         return text
     text = _PEM_RE.sub("[REDACTED_PRIVATE_KEY]", text)
@@ -89,7 +82,6 @@ def mask_text(text):
 
 
 def redact(obj, _depth=0):
-    """JSON 구조에서 인증 토큰·쿠키·개인키 값을 제거하고 메타만 남긴다."""
     if _depth > 24:
         return "[REDACTED_DEPTH_LIMIT]"
     if isinstance(obj, dict):
@@ -110,7 +102,7 @@ def redact(obj, _depth=0):
 def _describe_secret(v):
     if isinstance(v, str):
         return {"_redacted": True, "length": len(v),
-                "prefix": v[:3] + "…" if len(v) > 6 else "…"}
+                "prefix": v[:3] + "..." if len(v) > 6 else "..."}
     if v is None:
         return None
     return {"_redacted": True, "type": type(v).__name__}

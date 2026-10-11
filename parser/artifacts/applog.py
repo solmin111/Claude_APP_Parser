@@ -1,23 +1,12 @@
-"""앱 로그 — 로그인·로그아웃·계정 전환·실행·종료.
-
-패키지 폴더 밖(%LOCALAPPDATA%\\Claude\\logs)에 있어 앱을 지워도 남는다.
-시간대 표시가 없는 현지시각이라, 파일 수정시각(UTC)과 마지막 줄을 견줘
-오프셋을 추정해 환산한다. 추정 사실은 레코드에 남긴다.
-"""
-
 import re
 
 from .. import events, model
 from ..util import excerpt
 
-# 2026-09-23 04:04:20  /  2026/09/23 04:04:20.123456
 _TS = re.compile(r"(\d{4})[-/](\d{2})[-/](\d{2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d+)?")
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
-# (정규식, event_id, 행위, 확신도, 짧은 라벨)
-# 짧은 라벨은 Behavior_details 에 들어간다 — 팀 양식은 로그 원문이 아니라
-# 행위를 요약한 짧은 표현을 쓴다(예: chatgpt_desktop 의 '인증 상태 변경 로그_auth_changed').
 RULES = [
     (re.compile(r"Login-state transition.*?loggedOut:\s*true\s*(?:->|→)\s*false", re.I),
      "E01-01", "로그인", model.CONF_CONFIRMED, "인증 상태 변경(로그인)"),
@@ -29,16 +18,13 @@ RULES = [
      "E08-01", "애플리케이션 실행", model.CONF_INFERRED, "실행 로그"),
 ]
 
-# 계정 전환: 한 줄에 이전 계정과 새 계정이 함께 적힌다
 _SWITCH = re.compile(r"uuid:\s*(" + _UUID + r")\s*(?:->|→)\s*(" + _UUID + r")", re.I)
-# 로그인 줄의 계정 (<none> -> uuid)
 _LOGIN_UUID = re.compile(r"uuid:\s*(?:<none>|null)\s*(?:->|→)\s*(" + _UUID + r")", re.I)
 _ACCOUNT = re.compile(r"account[_ ]?id\s*[:=]\s*[\"']?(" + _UUID + r")", re.I)
 _ORG = re.compile(r"org[_ ]?id\s*[:=]\s*[\"']?(" + _UUID + r")", re.I)
 
 
 def _offset_hours(lines, mtime_utc):
-    """로그 마지막 줄과 파일 수정시각의 차이로 시간대를 추정한다."""
     if not mtime_utc:
         return None
     last = None
@@ -56,7 +42,7 @@ def _offset_hours(lines, mtime_utc):
     except ValueError:
         return None
     diff = (naive.replace(tzinfo=timezone.utc) - mt).total_seconds() / 3600.0
-    step = round(diff * 4) / 4.0            # 15분 단위로 맞춘다
+    step = round(diff * 4) / 4.0
     return step if -14.0 <= step <= 14.0 else None
 
 
@@ -77,7 +63,7 @@ def parse(vfile, image, rb, max_excerpt=500):
     mtime = (vfile.si_times or {}).get("modified") or (vfile.fn_times or {}).get("modified")
     off = _offset_hours(lines, mtime)
     tz_note = ("로그에 시간대 표시가 없어 파일 수정시각과 대조해 UTC%+g 로 추정 환산"
-               % off) if off is not None else "시간대 표시 없음 — 원문 그대로"
+               % off) if off is not None else "시간대 표시 없음, 원문 그대로"
 
     out = []
     for i, ln in enumerate(lines, 1):
@@ -95,14 +81,12 @@ def parse(vfile, image, rb, max_excerpt=500):
 
         sw = _SWITCH.search(ln)
         matched = None
-        # 계정 전환은 '이전 계정 ≠ 새 계정' 일 때만이다. 같은 계정이 X→X 로 다시 찍히는 것은
-        # (로그아웃 후) 동일 계정 재로그인이지 전환이 아니므로, 로그인/로그아웃 규칙으로 넘긴다.
         if sw and "login-state" in ln.lower() and sw.group(1).lower() != sw.group(2).lower():
             det["account_uuid"] = sw.group(2)
             det["previous_account_uuid"] = sw.group(1)
             matched = ("E01-03", "계정 전환", model.CONF_CONFIRMED, "계정 전환")
         else:
-            if sw and "login-state" in ln.lower():       # 동일 계정(X→X) — 계정만 남긴다
+            if sw and "login-state" in ln.lower():
                 det["account_uuid"] = sw.group(2)
             lg = _LOGIN_UUID.search(ln)
             if lg:
@@ -114,7 +98,7 @@ def parse(vfile, image, rb, max_excerpt=500):
         if matched is None:
             continue
         eid, act, conf, label = matched
-        det["summary"] = label      # Behavior_details 용 짧은 라벨(로그 원문은 log_body 에만)
+        det["summary"] = label
         ts = model.timestamp(utc=utc, original=tm.group(0) if tm else None,
                              fmt="local_naive", meaning="로그 기록 시각",
                              source=model.TS_SOURCE_CONTENT, tz_note=tz_note,

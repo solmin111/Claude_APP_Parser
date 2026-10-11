@@ -1,13 +1,3 @@
-"""결과 출력 — result.json(전체) + 팀 공통 CSV 2종.
-
-팀 공통 형식 (헤더는 공유본과 바이트 단위로 같게, 끝 공백 2개 포함):
-  timeline.csv                Model, Timestamp, User_behavior, Behavior_details , Verdict,
-                              Artifact_path, Artifact_details
-  recovered_conversations.csv Model, timestamp, conversation_uuid, conversation_title,
-                              message_uuid, parent_message_uuid, message order, role,
-                              content, Artifact_path
-"""
-
 import csv
 import json
 import os
@@ -31,8 +21,6 @@ CSV_VERDICTS = ("확정", "의심")
 _ROLE = {"user": "user", "human": "user", "assistant": "assistant",
          "system": "system", "unknown": "unknown"}
 
-# 대화 저장소는 앱이 끼워 넣은 안내와 도구 결과도 role=user 로 담는다.
-# 그대로 싣으면 사용자가 한 말로 읽히므로, 무엇에서 온 본문인지로 다시 적는다.
 _ORIGIN_ROLE = {"user_typed": "user", "user_upload": "user",
                 "assistant": "assistant", "system": "system",
                 "system_injection": "system", "tool_result": "tool",
@@ -42,15 +30,10 @@ _TAG = {"cache_block": "Cache", "idb_leveldb": "IndexedDB", "idb_blob": "Blob",
         "config": "Config", "applog": "App Log", "applog_pkg": "App Log",
         "applog_shared": "App Log", "setuplog": "App Log", "prefetch": "Prefetch",
         "usn_journal": "USN"}
-# Behavior_details 에 넣을 핵심 내용을 고르는 순서.
-# summary 는 아티팩트가 만든 짧은 라벨(앱 로그 요약, 프리패치 run 라벨)로 맨 앞에 둔다.
-# identifiers 는 팀 매핑 규칙에 따라 식별자를 이 칸에 적기 위해 앞쪽에 둔다.
-# log_body(로그 원문)는 넣지 않는다 — 팀 양식은 원문이 아니라 짧은 요약을 쓴다
-# (원문은 result.json 의 details.log_body·evidence.excerpt 에 그대로 남는다).
 _CORE_KEYS = ("summary", "text", "prompt_text", "identifiers", "title", "model",
               "file_name", "key")
 
-EMPTY = "-"      # 팀 공통: 값이 없는 셀은 빈칸 대신 "-"
+EMPTY = "-"
 
 
 def write_json(path, payload):
@@ -61,7 +44,6 @@ def write_json(path, payload):
 
 
 def to_kst(utc_iso):
-    """UTC ISO(...Z) -> 'YYYY-MM-DD HH:MM:SS.ffffff KST'. 미상은 ''."""
     if not utc_iso:
         return ""
     dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00")) + timedelta(hours=9)
@@ -73,7 +55,6 @@ def _secs(utc_iso):
 
 
 def _safe(v):
-    """빈 셀은 EMPTY, 그 외는 Excel 수식 주입 방지."""
     s = "" if v is None else str(v)
     if not s.strip():
         return EMPTY
@@ -90,13 +71,6 @@ def _one_line(v, limit=300):
 
 
 def _winpath(r):
-    """이미지 내부 경로 '/Users/x/...' -> '<드라이브>\\Users\\x\\...'
-
-    드라이브 문자 우선순위:
-      1) location.drive — 이미지: SYSTEM\\MountedDevices 로 확인된 볼륨별 실제 문자
-      2) location.live_root — 라이브: 실제로 읽은 위치 (D:\\ 를 분석했으면 D:\\Users\\…)
-      3) 'C:' — 하이브가 없거나 문자가 없는 파티션은 종전대로 가정
-    """
     loc = (r.get("evidence") or {}).get("location") or {}
     p = loc.get("path") or ""
     return (loc.get("drive") or loc.get("live_root") or "C:") + p.replace("/", "\\") if p else ""
@@ -137,11 +111,6 @@ def _artifact_details(r, titles):
 
 
 def _titles(records):
-    """대화 UUID -> 제목. 저장소마다 대소문자가 달라 소문자로 맞춰 모은다.
-
-    cowork 세션은 대화 저장소에 제목이 없고 캐시 비콘에만 남는다. 비콘은
-    세션 ID 를 원래 대소문자로 적어서, 맞추지 않으면 제목이 붙지 않는다.
-    """
     titles = {}
     for r in records:
         det = r.get("details") or {}
@@ -156,7 +125,6 @@ def _title_of(titles, cid):
 
 
 def write_timeline_csv(path, records):
-    """NA-00(관찰)·판단 불가 는 제외. 시각 미상은 맨 뒤."""
     titles = _titles(records)
     rows = [r for r in records if r["event"]["event_id"] != "NA-00"
             and VERDICT.get(r["user_action"].get("confidence")) in CSV_VERDICTS
@@ -176,12 +144,6 @@ def write_timeline_csv(path, records):
 
 
 def write_conversations_csv(path, records):
-    """역할이 확인된 메시지만 싣는다.
-
-    중복은 '같은 대화의 같은 메시지가 두 저장소에 중복 수집된 것'만 접는다.
-    대화 UUID(와 메시지 UUID)를 키에 넣어, 서로 다른 대화의 동일 문구는 절대
-    합치지 않는다. 부모는 같은 대화의 직전 메시지, 첫 메시지는 ROOT_PARENT.
-    """
     titles = _titles(records)
     msgs, seen, seen_ids = [], {}, set()
     for r in records:
@@ -191,29 +153,23 @@ def write_conversations_csv(path, records):
             continue
         if det.get("origin"):
             role = _ORIGIN_ROLE.get(det["origin"], role)
-        # 발화자가 확인되지 않은 바이트 스캔 조각(role=unknown)은 CSV 에 싣지 않는다.
-        # 팀 양식은 발화자·순서가 확인된 메시지만 담는다. 조각은 result.json 에만 남는다.
         if role == "unknown":
             continue
         cid = det.get("conversation_uuid") or ""
         muid = det.get("message_uuid")
         utc = r["timestamp"].get("utc")
-        # 메시지 식별자가 있으면 (대화, 메시지) 로만 중복을 가린다 — 같은 대화의 같은
-        # 메시지가 두 저장소에 중복 수집된 경우에만 접히고, 다른 대화는 건드리지 않는다.
         if muid:
             idkey = (cid, muid)
             if idkey in seen_ids:
                 continue
             seen_ids.add(idkey)
         else:
-            # 식별자가 없을 때(초안 등)만 (대화, 역할, 본문) 으로 폴백한다. 대화 UUID 를
-            # 반드시 포함해, 서로 다른 대화의 동일 문구가 섞이지 않게 한다.
             key = (cid, role, " ".join(det["text"].split()))
             times = seen.get(key)
             if times is not None:
                 if any(u and utc and abs(_secs(u) - _secs(utc)) <= 2 for u in times):
                     continue
-                if not utc:          # 같은 대화·역할·본문인데 시각이 없다 → 중복 조각
+                if not utc:
                     continue
             seen.setdefault(key, []).append(utc)
         msgs.append((cid, utc or "", r["record_id"], role, det, r))
@@ -227,9 +183,6 @@ def write_conversations_csv(path, records):
                 prev_cid, prev_uuid, order = cid, ROOT_PARENT, 0
             order += 1
             uuid = det.get("message_uuid") or "%s-%d" % (cid or "msg", order)
-            # 부모는 아티팩트에 적힌 값을 쓰고, 없을 때만 같은 대화의 직전
-            # 메시지로 잇는다. 순번은 팀 양식대로 대화마다 1부터 센다 —
-            # 저장소의 원래 색인(0부터, 이벤트 seq)은 JSON 에 남아 있다.
             parent = det.get("parent_message_uuid") or prev_uuid
             w([MODEL, to_kst(utc), cid, _title_of(titles, cid), uuid, parent,
                order, role, det["text"], _winpath(r)])

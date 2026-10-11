@@ -1,8 +1,3 @@
-"""디스크 이미지 열기 — E01 은 libewf(pyewf), RAW 는 The Sleuth Kit(pytsk3).
-
-원본 이미지는 읽기 전용으로만 연다.
-"""
-
 import hashlib
 import os
 import re
@@ -25,7 +20,6 @@ _EWF_SEG_RE = re.compile(r"\.[Ee]([0-9]{2}|[A-Za-z]{2})$")
 
 
 class _EwfImgInfo(pytsk3.Img_Info):
-    """libewf 핸들을 TSK 이미지로 노출."""
 
     def __init__(self, handle):
         self._h = handle
@@ -97,8 +91,6 @@ def _open_ewf(path):
         raise ImageOpenError("E01 세그먼트 탐색 실패: %s" % _short(exc), path=path)
     _check_ewf_sequence(path, segments)
     names = [os.path.basename(s) for s in segments]
-    # 각 세그먼트는 마지막 섹션이 'next'(뒤에 더 있음) 또는 'done'(마지막)으로 끝난다.
-    # libewf 는 마지막 세그먼트가 빠져도 열기에 성공하므로 직접 확인한다.
     if _last_ewf_section(segments[-1]) == b"next":
         raise MissingSegmentError("E01 마지막 세그먼트 누락 ('%s' 가 next 섹션으로 끝남)"
                                   % names[-1], path=path, segments=names)
@@ -110,12 +102,12 @@ def _open_ewf(path):
                              segments=names)
     img = _EwfImgInfo(handle)
     size = img.get_size()
-    for off in (0, max(0, size - 512)):   # 절단/손상은 열기가 아니라 읽기에서 드러난다
+    for off in (0, max(0, size - 512)):
         try:
             img.read(off, 512)
         except (OSError, RuntimeError) as exc:
             img.close()
-            raise ImageOpenError("E01 데이터 읽기 실패 — 손상/절단 의심 (offset %d): %s"
+            raise ImageOpenError("E01 데이터 읽기 실패, 손상/절단 의심 (offset %d): %s"
                                  % (off, _short(exc)), path=path, segments=names)
     return Image(path, img, "ewf", segments)
 
@@ -127,7 +119,6 @@ def _last_ewf_section(path):
 
 
 def _check_ewf_sequence(path, segments):
-    """.E01 .E02 … 확장자 연속성 검사 (glob 은 중간 결번 이후를 조용히 버린다)."""
     exts = [os.path.splitext(s)[1][1:].upper() for s in segments]
     expected = [_ewf_ext(i) for i in range(1, len(exts) + 1)]
     if exts != expected:
@@ -140,7 +131,6 @@ def _check_ewf_sequence(path, segments):
 
 
 def _ewf_ext(n):
-    """1->E01 … 99->E99, 100->EAA …"""
     if n <= 99:
         return "E%02d" % n
     n -= 100
@@ -162,7 +152,7 @@ def _open_raw(path):
     if os.path.getsize(path) == 0:
         raise ImageOpenError("이미지 크기가 0 입니다", path=path)
     try:
-        img = pytsk3.Img_Info(path)  # TSK 가 .001 분할 세그먼트를 자동으로 이어 읽음
+        img = pytsk3.Img_Info(path)
     except OSError as exc:
         raise ImageOpenError("RAW 이미지를 열 수 없습니다: %s" % _short(exc), path=path)
     return Image(path, img, "split-raw" if len(segments) > 1 else "raw", segments)

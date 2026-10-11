@@ -1,11 +1,3 @@
-"""QA 중 발견한 두 오분류 회귀 방지.
-
-이슈 1  입력창 초안에 업로드 대상 파일 경로/파일명만 남은 경우,
-        프롬프트(E04-01)로 묻히지 말고 업로드(E05-01/E05-03, 의심)로 올라와야 한다.
-이슈 2  동일 계정이 X→X 로 다시 찍힌 로그인-상태 줄은 계정 전환(E01-03)이 아니라
-        로그인(E01-01)으로 잡혀야 한다. 진짜 전환(A→B, A≠B)만 E01-03.
-"""
-
 import os
 import sys
 import unittest
@@ -37,7 +29,6 @@ class FakeFile:
         return {"path": self.path}
 
 
-# ── 이슈 2: applog 계정 전환 vs 재로그인 ───────────────────────────────
 LOG_PATH = "/Users/u/AppData/Local/Claude/logs/main.log"
 
 
@@ -51,14 +42,14 @@ class AccountSwitchGuard(unittest.TestCase):
         ln = ("2026-09-23 15:06:12.100 Login-state transition: "
               "loggedOut: true -> false, uuid: %s -> %s" % (A, A))
         got = _applog([ln])
-        self.assertIn(("E01-01", model.CONF_CONFIRMED), got)          # 로그인으로
-        self.assertNotIn("E01-03", [e for e, _ in got])               # 전환 아님
+        self.assertIn(("E01-01", model.CONF_CONFIRMED), got)
+        self.assertNotIn("E01-03", [e for e, _ in got])
 
     def test_genuine_switch_is_e0103(self):
         ln = ("2026-09-23 15:07:00.000 Login-state transition: "
               "account uuid: %s -> %s" % (A, B))
         got = _applog([ln])
-        self.assertIn(("E01-03", model.CONF_CONFIRMED), got)          # 다른 계정 → 전환
+        self.assertIn(("E01-03", model.CONF_CONFIRMED), got)
 
     def test_same_account_unicode_arrow(self):
         ln = ("2026-09-23 15:06:12.100 Login-state transition: "
@@ -66,7 +57,6 @@ class AccountSwitchGuard(unittest.TestCase):
         self.assertNotIn("E01-03", [e for e, _ in _applog([ln])])
 
 
-# ── 이슈 1: idb 초안 업로드 참조 승격 ──────────────────────────────────
 class UploadRefClassify(unittest.TestCase):
     def test_bare_filename(self):
         self.assertEqual(idb._upload_of("회의록_20261001.pdf"), ("E05-03", "문서 업로드"))
@@ -80,7 +70,7 @@ class UploadRefClassify(unittest.TestCase):
                          ("E05-01", "이미지 업로드"))
 
     def test_sentence_with_filename_is_not_upload(self):
-        self.assertIsNone(idb._upload_of("회의록.pdf 요약해줘"))        # 공백 있는 문장
+        self.assertIsNone(idb._upload_of("회의록.pdf 요약해줘"))
 
     def test_plain_prompt_is_not_upload(self):
         self.assertIsNone(idb._upload_of("오늘 일정 정리해줘"))
@@ -90,13 +80,11 @@ class UploadRefClassify(unittest.TestCase):
 
 
 class DraftUploadPromotion(unittest.TestCase):
-    """초안 루프가 업로드 참조를 E05 로 올리고, 같은 파일 중복은 접는지."""
 
     def _run(self, drafts, monkey):
-        # _draft_texts 를 통제된 초안 목록으로 대체한다.
         monkey(lambda data: [(t, 100 + i, "store:chat-draft:", 1)
                              for i, t in enumerate(drafts)])
-        data = b"store:chat-draft: claude.ai conversation"   # is_storage_data 통과용
+        data = b"store:chat-draft: claude.ai conversation"
         recs = idb.parse(FakeFile(data, "/x/IndexedDB/claude/000003.log"),
                          IMG, RecordBuilder())
         return recs
@@ -125,7 +113,7 @@ class DraftUploadPromotion(unittest.TestCase):
             "/mnt/user-data/uploads/회의록_20261001.pdf",
         ], self._set)
         up = [r for r in recs if r["details"].get("item_type") == "upload_ref"]
-        self.assertEqual(len(up), 1)                       # 세 형태 → 한 건으로 접힘
+        self.assertEqual(len(up), 1)
 
     def test_normal_draft_stays_prompt(self):
         recs = self._run(["오늘 회의 요약 정리해줘"], self._set)

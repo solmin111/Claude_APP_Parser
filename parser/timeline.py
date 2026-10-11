@@ -1,6 +1,3 @@
-"""타임라인 구성 — 확인 가능한 시각만 정렬하고, 시각 미상은 별도 유지."""
-
-
 def build(records):
     dated = []
     undated = []

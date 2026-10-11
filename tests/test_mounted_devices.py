@@ -1,10 +1,3 @@
-"""SYSTEM\\MountedDevices 로 볼륨별 드라이브 문자를 확인하는 로직 검증.
-
-이미지 입력의 Artifact_path 드라이브 문자가 'C: 가정' 이 아니라 레지스트리 실측이 되는지.
-공유 구현(parser/mounted_devices.py, ChatGPT Desktop 파서와 동일)의 자체 검사에 더해,
-output._winpath 가 location.drive 를 우선 쓰는지와 하이브 없을 때의 폴백을 본다.
-"""
-
 import os
 import struct
 import sys
@@ -71,9 +64,7 @@ class MountedDevicesParsing(unittest.TestCase):
         self.assertIsNone(mounted_devices.volume_key(_Img(), "GPT", 512, 999 * 512))
 
     def test_assign_fills_drive_and_leaves_unknown_partition(self):
-        """하이브가 있는 볼륨의 문자는 채우고, MountedDevices 에 없는 파티션은 drive 를 두지 않는다."""
         hive = mounted_devices._synthetic_hive()
-        # 합성 하이브의 C: 키 = 디스크서명 0x44332211 + 오프셋 227540992 (MBR)
         mbr = bytearray(512)
         mbr[0x1B8:0x1BC] = b"\x11\x22\x33\x44"
 

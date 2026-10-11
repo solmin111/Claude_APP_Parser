@@ -1,10 +1,3 @@
-"""라이브 분석(--input-type live) 검증.
-
-실제 PC 대신 임시 폴더를 볼륨 루트로 삼아 같은 경로 구조를 만든다.
-
-  python -m unittest discover -s tests -v
-"""
-
 import contextlib
 import csv
 import hashlib
@@ -44,7 +37,6 @@ def run_cli(*args):
 
 
 def snapshot(root):
-    """원본 불변 확인용: 상대경로 -> (sha256, mtime_ns, size)"""
     snap = {}
     for d, _dirs, files in os.walk(root):
         for f in files:
@@ -75,8 +67,8 @@ class LiveTest(unittest.TestCase):
     def claude_tree(self):
         self.put(LOG, LOG_TEXT, "2026-09-23T04:24:51")
         self.put(CFG, b'{"locale": "ko-KR", "userThemeMode": "system"}\n', "2026-09-23T04:24:50")
-        self.put("Users/tester/.claude/settings.json", b'{"theme":"dark"}')       # 다른 제품
-        self.put("Users/tester/Desktop/main.log", LOG_TEXT)                       # 탐색 경로 밖
+        self.put("Users/tester/.claude/settings.json", b'{"theme":"dark"}')
+        self.put("Users/tester/Desktop/main.log", LOG_TEXT)
 
     def live(self, *extra):
         out = os.path.join(self.work, "out")
@@ -93,14 +85,12 @@ class LiveTest(unittest.TestCase):
         with open(os.path.join(out, "timeline.csv"), encoding="utf-8-sig", newline="") as fh:
             rows = list(csv.DictReader(fh))
         got = [(r["Timestamp"], r["User_behavior"], r["Verdict"]) for r in rows]
-        # 이미지 입력(test_bitlocker.EXPECTED_ROWS)과 같은 행위·시각·판정
         self.assertEqual(got, [
             ("2026-09-23 13:03:58.000000 KST", "애플리케이션 실행", "의심"),
             ("2026-09-23 13:04:10.000000 KST", "로그인", "확정"),
             ("2026-09-23 13:24:50.000000 KST", "정상 종료", "확정"),
             ("2026-09-23 13:24:51.000000 KST", "정상 종료", "확정"),
         ])
-        # Artifact_path 는 실제로 읽은 드라이브 기준 경로다
         log_path = drive + rel_root + "\\" + LOG.replace("/", "\\")
         self.assertEqual(rows[1]["Artifact_path"].lower(), log_path.lower())
         self.assertIn("수집=live", rows[1]["Artifact_details "])
@@ -110,10 +100,9 @@ class LiveTest(unittest.TestCase):
         self.assertIn("라이브    :", stdout)
         loc = result["records"][0]["evidence"]["location"]
         self.assertEqual(loc["time_source"], LiveVfs.TIME_SOURCE)
-        self.assertIsNone(loc["ntfs_standard_information"]["mft_modified"])  # 만들어 넣지 않는다
-        # 탐색 경로 밖(Desktop · ~/.claude) 파일은 열거하지 않는다 — 이미지 입력과 같은 범위
+        self.assertIsNone(loc["ntfs_standard_information"]["mft_modified"])
         self.assertEqual(result["scan"]["files_scanned"], 2)
-        self.assertIsNone(result["usn_journal"])           # 라이브는 $UsnJrnl 을 읽지 않는다
+        self.assertIsNone(result["usn_journal"])
 
     def test_originals_unchanged(self):
         self.claude_tree()
@@ -148,7 +137,6 @@ class LiveTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
     def test_folder_is_not_live_by_default(self):
-        """폴더를 주면 추출 트리(dir)로 본다 — 라이브는 명시해야 한다."""
         self.claude_tree()
         out = os.path.join(self.work, "out")
         code, _o, err = run_cli("-i", self.root, "-o", out, "--format", "json")
@@ -158,7 +146,6 @@ class LiveTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows 공유 모드 시험")
     def test_file_held_by_running_app_is_read(self):
-        """앱이 DELETE 권한까지 잡고 연 파일(실행 중 Claude 의 HTTP 캐시와 같은 상태)도 읽는다."""
         self.claude_tree()
         handle = _hold(os.path.join(self.root, *LOG.split("/")), share=0x7, access=0xC0010000)
         try:
@@ -173,14 +160,13 @@ class LiveTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows 공유 모드 시험")
     def test_exclusively_locked_file_is_reported(self):
-        """누구와도 공유하지 않는 파일은 읽지 못한다 — 실패를 숨기지 않고 잠김으로 남긴다."""
         self.claude_tree()
         handle = _hold(os.path.join(self.root, *LOG.split("/")), share=0, access=0x80000000)
         try:
             code, stdout, err, out = self.live()
         finally:
             _close(handle)
-        self.assertEqual(code, 1, err)                      # 부분 결과: 오류가 있음을 알린다
+        self.assertEqual(code, 1, err)
         with open(os.path.join(out, "result.json"), encoding="utf-8") as fh:
             result = json.load(fh)
         (fail,) = result["filesystem"]["read_failures"]

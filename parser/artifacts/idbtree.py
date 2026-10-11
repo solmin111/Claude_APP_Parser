@@ -1,22 +1,3 @@
-"""IndexedDB 정식 파싱 — 대화를 객체 단위로 복원한다.
-
-바이트를 긁어 본문을 찾는 방식은 누가 한 말인지, 언제 한 말인지 알 수 없었다.
-IndexedDB 값은 V8 구조화 복제(structured clone)라서 정식 역직렬화를 거치면
-파이썬 dict 로 나온다. 그러면 발화자·시각·대화 UUID 를 추측 없이 읽는다.
-
-Claude Desktop 은 claude.ai 오리진 아래 IndexedDB 를 여섯 개 쓰는데, 대화는
-두 곳에 두 가지 형태로 들어간다.
-
-  claude-conversation-store / trees
-      product='chat'    tree = {uuid, name, chat_messages:[{sender, content, …}]}
-      product='cowork'  tree = {events:[{payload:{message:{role, content}, …}}]}
-  keyval-store / keyval
-      'react-query-cache' -> 대화 목록(제목·생성시각·모델·임시채팅 플래그)
-
-한 대화가 여러 레코드에 걸쳐 여러 판본으로 남는다 (앱이 갱신할 때마다 쌓임).
-메시지 UUID 로 접고 가장 긴 본문을 남긴다 — 잘린 판본 때문에 본문을 잃지 않는다.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -36,12 +17,10 @@ MAX_LIST = 800
 ROLE_MAP = {"human": "user", "user": "user", "assistant": "assistant",
             "system": "system", "model": "assistant"}
 
-# 대화 객체와 모양이 겹치지만 대화가 아닌 것들
 ORG_MARKERS = ("capabilities", "billing_type", "organization_type",
                "rate_limit_tier", "raven_settings", "api_disabled_reason")
 PROJECT_MARKERS = ("creator", "archiver", "is_private", "prompt_template")
 
-# 사용자가 직접 친 말이 아닌 본문
 SYS_INJECT = re.compile(r"^\s*<(system-reminder|env|system)>", re.I)
 UPLOAD_BLOCK = re.compile(r"^\s*<uploaded_files>", re.I)
 
@@ -50,37 +29,18 @@ def import_error():
     return _IMPORT_ERROR
 
 
-# ── 이미지 안의 파일을 임시 폴더로 꺼낸다 ─────────────────────────────
-# ccl 은 디스크 위의 LevelDB 디렉터리를 요구한다. 이미지 안 파일은 그대로
-# 열 수 없으므로 원래 디렉터리 구조를 유지해 임시 폴더에 쓴다. 대소문자를
-# 보존해야 한다 — LevelDB 는 CURRENT / MANIFEST-nnnnnn 을 정확히 찾는다.
-
 _IDB_SPLIT = ".indexeddb."
 
 
 def _slot(path):
-    """이 파일이 어느 저장소에 속하는지 — 원본 경로에서 만든 짧은 이름.
-
-    한 이미지에 Windows 사용자가 여럿이면 IndexedDB 폴더 이름이 모두 같다
-    (https_claude.ai_0.indexeddb.leveldb). 그대로 풀면 뒤에 나온 사용자가
-    앞 사용자를 덮어써서 한 사람의 대화를 통째로 잃는다. 그래서 저장소가
-    있던 자리(사용자·설치 형태)까지 이름에 담아 따로 둔다.
-    """
     norm = path.replace(chr(92), "/")
     i = norm.lower().find(_IDB_SPLIT)
-    holder = norm[:norm.rfind("/", 0, i)]              # 'Users/alice/AppData/…/IndexedDB'
+    holder = norm[:norm.rfind("/", 0, i)]
     tag = re.sub(r"[^0-9A-Za-z]+", "_", holder).strip("_").lower()
     return "%s_%s" % (tag[-48:], hashlib.sha1(holder.encode("utf-8")).hexdigest()[:8])
 
 
 def materialize(vfiles, dst):
-    """
-    -> {디렉터리이름: 경로}, [(원본 VfsFile, 임시경로)]
-
-    저장소마다 자기 자리(_slot)에 푼다. 사용자가 여럿이어도 섞이지 않는다.
-    삭제된 엔트리는 같은 이름으로 덮어쓰면 살아있는 파일을 가리므로 별도
-    디렉터리에 담는다 (deleted_<MFT#>/).
-    """
     dirs, written = {}, []
     for vfile in vfiles:
         norm = vfile.path.replace("\\", "/")
@@ -88,7 +48,7 @@ def materialize(vfiles, dst):
         i = low.find(_IDB_SPLIT)
         if i < 0:
             continue
-        rel = norm[low.rfind("/", 0, i) + 1:]           # 'https_…leveldb/000003.log'
+        rel = norm[low.rfind("/", 0, i) + 1:]
         base = os.path.join(dst, _slot(vfile.path))
         if not vfile.allocated:
             base = os.path.join(base, "deleted_%s" % (vfile.mft_record or 0))
@@ -107,7 +67,6 @@ def materialize(vfiles, dst):
 
 
 def db_pairs(dirs):
-    """materialize 결과에서 (leveldb 디렉터리, blob 디렉터리) 짝을 만든다."""
     pairs = []
     for (base, top), path in sorted(dirs.items()):
         if not top.lower().endswith(".leveldb"):
@@ -118,7 +77,6 @@ def db_pairs(dirs):
 
 
 def open_db(leveldb_dir, blob_dir=None):
-    """열지 못하면 None — 호출한 쪽이 바이트 스캔으로 넘어간다."""
     if _idb is None:
         return None
     try:
@@ -129,7 +87,6 @@ def open_db(leveldb_dir, blob_dir=None):
 
 
 def iter_records(db):
-    """모든 데이터베이스·스토어의 레코드. -> (db이름, 스토어명, 키, 값, live)"""
     meta = getattr(db, "global_metadata", None) or getattr(
         getattr(db, "_raw_db", None), "global_metadata", None)
     try:
@@ -148,7 +105,7 @@ def iter_records(db):
                 it = store.iterate_records()
             except Exception:
                 continue
-            while True:                       # 한 레코드가 깨져도 멈추지 않는다
+            while True:
                 try:
                     rec = next(it)
                 except StopIteration:
@@ -160,17 +117,7 @@ def iter_records(db):
                        bool(rec.is_live))
 
 
-# ── 본문 추출 ─────────────────────────────────────────────────────────
-
 def content_text(content):
-    """
-    -> (본문, 블록종류들)
-
-    content 는 문자열이거나 블록 배열이다. 블록에는 사용자 본문(text) 말고도
-    모델 내부 사고(thinking)·도구 호출(tool_use)·도구 결과(tool_result)가 섞여
-    있다. 본문만 모으고 나머지는 종류만 기록한다 — 도구 출력을 사용자 발화로
-    싣지 않기 위해서다.
-    """
     kinds = []
     if isinstance(content, str):
         return content, kinds
@@ -188,10 +135,10 @@ def content_text(content):
         if t in ("text", "") and isinstance(item.get("text"), str):
             parts.append(item["text"])
         elif t == "thinking":
-            continue                                   # 모델 내부 사고
+            continue
         elif t in ("tool_use", "tool_result", "server_tool_use",
                    "web_search_tool_result", "knowledge"):
-            continue                                   # 도구 왕복
+            continue
         elif isinstance(item.get("text"), str):
             parts.append(item["text"])
         elif item.get("content"):
@@ -203,7 +150,6 @@ def content_text(content):
 
 
 def as_text(value):
-    """V8 역직렬화가 일부 값을 bytes 로 준다. 문자열로 맞춘다."""
     if value is None:
         return ""
     if isinstance(value, bytes):
@@ -218,12 +164,11 @@ def _norm(uuid):
 def _msg(role, text, kinds, *, uuid, conversation, created_at=None,
          index=None, parent=None, model_id="", session="", source="",
          is_live=True, attachments=None, files=None):
-    """메시지 한 건을 평평한 사전으로. 본문이 없으면 None."""
     if not text or not text.strip():
         return None
     role = ROLE_MAP.get(str(role).lower(), "unknown")
     if role == "user" and ("tool_result" in kinds and "text" not in kinds):
-        origin = "tool_result"                 # 도구 결과를 앱이 user 로 넣는다
+        origin = "tool_result"
     elif SYS_INJECT.match(text):
         origin = "system_injection"
     elif UPLOAD_BLOCK.match(text):
@@ -242,7 +187,6 @@ def _msg(role, text, kinds, *, uuid, conversation, created_at=None,
 
 
 def from_chat_tree(tree, key, is_live):
-    """product='chat' — 고전 대화 객체. tree.chat_messages 를 순서대로."""
     out = []
     conv = tree.get("uuid") or key
     model_id = tree.get("model") or ""
@@ -264,20 +208,17 @@ def from_chat_tree(tree, key, is_live):
 
 
 def from_cowork_tree(tree, key, is_live):
-    """product='cowork' — 이벤트 스트림. events[].payload.message 가 본문."""
     out = []
     for ev in tree.get("events") or []:
         if not isinstance(ev, dict):
             continue
         p = ev.get("payload")
         if not isinstance(p, dict):
-            continue                            # permission_resolved 등 본문 없음
+            continue
         msg = p.get("message")
         if not isinstance(msg, dict):
             continue
         text, kinds = content_text(msg.get("content"))
-        # 모델 응답 payload 에는 created_at 이 없다. 이벤트의 서버 수신 시각
-        # (epoch ms) 이 같은 값을 가리키므로 그것으로 대신한다.
         when = p.get("created_at") or ev.get("serverCreatedAt")
         rec = _msg(msg.get("role") or p.get("type"), text, kinds,
                    uuid=p.get("uuid") or ev.get("dedupKey"), conversation=key,
@@ -291,15 +232,7 @@ def from_cowork_tree(tree, key, is_live):
     return out
 
 
-# ── 일반 순회 (스키마를 모르는 저장소용) ──────────────────────────────
-
 def walk_messages(node, out, depth=0, conversation=""):
-    """
-    메시지로 보이는 dict 를 찾되 그것을 감싼 대화를 함께 기억한다.
-
-    한 레코드가 여러 대화의 메시지를 담기도 한다. 대화를 따라가지 않으면
-    서로 다른 대화의 메시지가 한 대화로 뭉쳐 없던 흐름이 생긴다.
-    """
     if depth > MAX_DEPTH:
         return
     if isinstance(node, dict):
@@ -320,7 +253,6 @@ def walk_messages(node, out, depth=0, conversation=""):
 
 
 def find_conversations(node, out, depth=0):
-    """대화 목록 객체 (uuid + name + 생성시각). 조직·프로젝트는 뺀다."""
     if depth > MAX_DEPTH:
         return
     if isinstance(node, dict):
@@ -338,7 +270,6 @@ def find_conversations(node, out, depth=0):
 
 
 def _fold(store, rec):
-    """같은 메시지의 여러 판본을 하나로. 가장 긴 본문과 채워진 필드를 남긴다."""
     key = rec["message_uuid"] or ("%s#%s" % (rec["conversation_uuid"], rec["text"][:40]))
     prev = store.get(key)
     if prev is None:
@@ -357,12 +288,6 @@ def _fold(store, rec):
 
 
 def harvest(db):
-    """
-    IndexedDB 하나에서 대화를 전부 꺼낸다.
-
-    -> {"messages": [...], "conversations": {uuid: 메타}, "opened": [...],
-        "stats": {...}}
-    """
     messages, conversations, opened = {}, {}, []
     stats = {"records": 0, "trees_chat": 0, "trees_cowork": 0,
              "generic": 0, "stores": {}}
@@ -375,7 +300,6 @@ def harvest(db):
             continue
         skey = str(key) if key is not None else ""
 
-        # 1) 대화 저장소 — 스키마를 아는 두 형태
         tree = value.get("tree")
         if isinstance(tree, dict):
             if tree.get("chat_messages") is not None:
@@ -402,7 +326,6 @@ def harvest(db):
                         _norm(value.get("conversationUuid") or skey), {})[k] = value[k]
             continue
 
-        # 2) 열어본 기록 — meta 스토어
         if store == "meta" and value.get("conversationUuid"):
             opened.append({"conversation_uuid": _norm(value["conversationUuid"]),
                            "last_opened_at": value.get("lastOpenedAt"),
@@ -412,7 +335,6 @@ def harvest(db):
                            "product": value.get("product")})
             continue
 
-        # 3) 그 밖의 저장소 — 스키마를 모르니 일반 순회
         convs = []
         find_conversations(value, convs)
         for c in convs:
@@ -425,8 +347,6 @@ def harvest(db):
                            ("is_archived", "is_archived")):
                 if c.get(k) is not None and meta.get(dst) in (None, ""):
                     meta[dst] = c[k]
-            # 요약은 본문이 남지 않은 대화의 유일한 내용 단서다. 판본마다
-            # 길이가 달라서, 가장 긴 것을 남긴다.
             summary = as_text(c.get("summary"))
             if summary and len(summary) > len(meta.get("summary") or ""):
                 meta["summary"] = summary

@@ -1,5 +1,3 @@
-"""claude_desktop_config.json — 수집·민감값 비노출·로그인 중복 방지 검증."""
-
 import json
 import os
 import sys
@@ -53,17 +51,16 @@ class DesktopConfig(unittest.TestCase):
 
     def test_observation_only_names_no_secrets(self):
         recs = parse(SAMPLE)
-        self.assertEqual([r["event"]["event_id"] for r in recs], ["NA-00"])   # 로그인 행을 따로 만들지 않는다
+        self.assertEqual([r["event"]["event_id"] for r in recs], ["NA-00"])
         det = recs[0]["details"]
         self.assertEqual(det["mcp_servers"], ["files", "github"])
         self.assertEqual(det["mcp_server_commands"], {"github": "npx.cmd", "files": "uvx"})
-        self.assertEqual(det["account_uuids"], [ACCOUNT])                     # 정해진 자리에서만
+        self.assertEqual(det["account_uuids"], [ACCOUNT])
         dump = json.dumps(recs, ensure_ascii=False)
         for secret in (TOKEN, ARG_UUID, "secret\\\\folder", "Documents\\\\cowork", "Program Files"):
             self.assertNotIn(secret, dump)
 
     def test_no_shutdown_or_login_rules_from_config_json(self):
-        """config.json 전용 규칙(정상 종료·식별자 로그인)이 이 파일에 적용되지 않는다."""
         recs = parse({"mcpServers": {}, "note": ARG_UUID})
         self.assertEqual([r["event"]["event_id"] for r in recs], ["NA-00"])
         self.assertEqual(recs[0]["details"]["account_uuids"], [])
